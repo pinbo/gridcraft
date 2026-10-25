@@ -2764,6 +2764,22 @@ fn paste_formats_and_all_carry_conditional_formats_and_values_do_not() {
 }
 
 #[test]
+fn pasting_formats_from_one_cell_over_a_range_makes_one_rule_over_the_range() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
+    s.execute("home.bold", json!({"range": "A1"})).unwrap();
+    s.execute("home.conditionalFormat", json!({"range": "A1", "rule": {"type": "colorScale"}})).unwrap();
+    s.execute("edit.copy", json!({"range": "A1"})).unwrap();
+    s.execute("selection.set", json!({"range": "C1:C5"})).unwrap();
+    s.execute("edit.pasteSpecial", json!({"what": "formats"})).unwrap();
+    let sh = s.doc().unwrap().wb.sheet(0).unwrap().clone();
+    let on_c: Vec<_> = sh.cond_formats.iter().filter(|c| c.ranges.iter().any(|r| r.start.col == 2)).collect();
+    assert_eq!(on_c.len(), 1);
+    assert_eq!(on_c[0].ranges.iter().map(|r| r.count()).sum::<u64>(), 5);
+    assert!(s.doc().unwrap().wb.styles.get(sh.cell(gridcraft_core::CellRef::new(4, 2)).map_or(Default::default(), |c| c.style)).font.bold);
+}
+
+#[test]
 fn checkboxes_survive_xlsx_as_cell_controls() {
     let mut s = s();
     s.execute("insert.checkbox", json!({"range": "A1:A2"})).unwrap();

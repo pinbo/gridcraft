@@ -1244,30 +1244,29 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
             if cut_move {
                 super::data::remove_cond_format_cells(&mut cx.sheet_mut(clip.sheet)?.cond_formats, &[src]);
             }
-            let mut pasted = Vec::new();
+            // A tiled paste makes one rule per copied rule across all its tiles, as in Excel, so a
+            // color scale copied from one cell scales over the whole destination.
+            let mut pieces: Vec<Vec<RangeRef>> = vec![Vec::new(); rules.len()];
             for tr in 0..tiles_r {
                 for tc in 0..tiles_c {
                     let Some(origin) = at.offset((tr * h) as i64, (tc * w) as i64) else { continue };
                     let Some(end) = origin.offset(h as i64 - 1, w as i64 - 1) else { continue };
-                    let tile = RangeRef::new(origin, end);
-                    super::data::remove_cond_format_cells(&mut cx.sheet_mut(dest_sheet)?.cond_formats, &[tile]);
-                    for cf in &rules {
-                        let pieces: Vec<RangeRef> = cf
-                            .ranges
-                            .iter()
-                            .filter_map(|r| r.intersection(&src))
-                            .filter_map(|i| {
-                                let (dr, dc) = (i.start.row as i64 - src.start.row as i64, i.start.col as i64 - src.start.col as i64);
-                                let (er, ec) = (i.end.row as i64 - src.start.row as i64, i.end.col as i64 - src.start.col as i64);
-                                Some(RangeRef::new(origin.offset(dr, dc)?, origin.offset(er, ec)?))
-                            })
-                            .collect();
-                        let (Some(anchor), Some(first)) = (cf.ranges.first().map(|r| r.start), pieces.first().map(|r| r.start)) else { continue };
-                        let (rule, formulas) = super::data::move_cf_rule(&cf.rule, anchor, first);
-                        cf_formulas |= formulas;
-                        pasted.push(gridcraft_model::CondFormat { ranges: pieces, rule, priority: 0, stop_if_true: cf.stop_if_true });
+                    super::data::remove_cond_format_cells(&mut cx.sheet_mut(dest_sheet)?.cond_formats, &[RangeRef::new(origin, end)]);
+                    for (cf, out) in rules.iter().zip(pieces.iter_mut()) {
+                        out.extend(cf.ranges.iter().filter_map(|r| r.intersection(&src)).filter_map(|i| {
+                            let (dr, dc) = (i.start.row as i64 - src.start.row as i64, i.start.col as i64 - src.start.col as i64);
+                            let (er, ec) = (i.end.row as i64 - src.start.row as i64, i.end.col as i64 - src.start.col as i64);
+                            Some(RangeRef::new(origin.offset(dr, dc)?, origin.offset(er, ec)?))
+                        }));
                     }
                 }
+            }
+            let mut pasted = Vec::new();
+            for (cf, ranges) in rules.iter().zip(pieces) {
+                let (Some(anchor), Some(first)) = (cf.ranges.first().map(|r| r.start), ranges.first().map(|r| r.start)) else { continue };
+                let (rule, formulas) = super::data::move_cf_rule(&cf.rule, anchor, first);
+                cf_formulas |= formulas;
+                pasted.push(gridcraft_model::CondFormat { ranges, rule, priority: 0, stop_if_true: cf.stop_if_true });
             }
             if !pasted.is_empty() {
                 // Pasted rules rank above the destination's, in the order they were copied.
