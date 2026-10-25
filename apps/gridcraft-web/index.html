@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GridCraft</title>
   <link data-trunk rel="icon" href="../../assets/app-icon/gridcraft.ico" />
-  <link data-trunk rel="rust" data-bin="gridcraft-web" data-wasm-opt="z" data-weak-refs />
+  <link data-trunk rel="rust" data-bin="gridcraft-web" data-wasm-opt="z" data-wasm-opt-params="--enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-reference-types" data-cargo-profile="web" data-weak-refs />
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #f3f3f3; }
     #gridcraft_canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }

@@ -79,3 +79,13 @@ opt-level = 3
 lto = "thin"
 codegen-units = 16
 debug = 0
+
+# Size-optimised profile for the web build (`trunk build --release` selects it via
+# `data-cargo-profile` in apps/gridcraft-web/index.html). Native release stays speed-tuned.
+[profile.web]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = true
+# No panic = "abort": Session::execute's catch_unwind safety net (never-crash) needs unwinding.
