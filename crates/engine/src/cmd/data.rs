@@ -1268,6 +1268,41 @@ pub(super) fn move_rule_formula(f: &str, first: CellRef, to: CellRef) -> String 
     if has_relative { format!("{eq}{moved}") } else { f.to_string() }
 }
 
+/// A conditional-format rule copied from a range anchored at `from` to one anchored at `to`: the
+/// relative references in its formulas move with it. The flag says the rule holds formulas.
+pub(super) fn move_cf_rule(rule: &CfRule, from: CellRef, to: CellRef) -> (CfRule, bool) {
+    let formulas = std::cell::Cell::new(false);
+    let text = |f: &str| {
+        if f.trim_start().starts_with('=') {
+            formulas.set(true);
+        }
+        move_rule_formula(f, from, to)
+    };
+    let kind = |k: &CfValueKind| match k {
+        CfValueKind::Formula(f) => {
+            formulas.set(true);
+            CfValueKind::Formula(move_rule_formula(f, from, to))
+        }
+        other => other.clone(),
+    };
+    let moved = match rule {
+        CfRule::CellIs { op, a, b, style } => CfRule::CellIs { op: *op, a: text(a), b: b.as_deref().map(text), style: style.clone() },
+        CfRule::Expression { formula, style } => {
+            formulas.set(true);
+            CfRule::Expression { formula: move_rule_formula(formula, from, to), style: style.clone() }
+        }
+        CfRule::ColorScale { stops } => CfRule::ColorScale { stops: stops.iter().map(|(k, c)| (kind(k), *c)).collect() },
+        CfRule::DataBar { min, max, color, gradient, show_value } => {
+            CfRule::DataBar { min: kind(min), max: kind(max), color: *color, gradient: *gradient, show_value: *show_value }
+        }
+        CfRule::IconSet { set, thresholds, reverse, show_value } => {
+            CfRule::IconSet { set: set.clone(), thresholds: thresholds.iter().map(kind).collect(), reverse: *reverse, show_value: *show_value }
+        }
+        other => other.clone(),
+    };
+    (moved, formulas.get())
+}
+
 fn compare_op(op: CfOperator, n: f64, a: Option<f64>, b: Option<f64>) -> bool {
     let Some(a) = a else { return false };
     match op {

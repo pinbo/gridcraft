@@ -1018,6 +1018,7 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
         // Check the whole footprint before the source is emptied, so a move that overflows the grid loses nothing.
         return Err(EngineError::Other("The cut area doesn't fit at this position; nothing was moved.".into()));
     }
+    let mut cf_formulas = false;
     edit(s, |cx| {
         // Styles from another workbook must be re-interned.
         let mut style_map = std::collections::HashMap::new();
@@ -1235,6 +1236,52 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
                 }
             }
         }
+        // Conditional formats travel with the formats: the destination takes the copied block's
+        // rules (and loses its own, as in Excel), and a cut takes them from the source.
+        if !link && !transpose && matches!(what, What::All | What::Formats | What::AllExceptBorders) {
+            let rules: Vec<gridcraft_model::CondFormat> =
+                src_sheet.cond_formats.iter().filter(|cf| cf.ranges.iter().any(|r| r.intersects(&src))).cloned().collect();
+            if cut_move {
+                super::data::remove_cond_format_cells(&mut cx.sheet_mut(clip.sheet)?.cond_formats, &[src]);
+            }
+            let mut pasted = Vec::new();
+            for tr in 0..tiles_r {
+                for tc in 0..tiles_c {
+                    let Some(origin) = at.offset((tr * h) as i64, (tc * w) as i64) else { continue };
+                    let Some(end) = origin.offset(h as i64 - 1, w as i64 - 1) else { continue };
+                    let tile = RangeRef::new(origin, end);
+                    super::data::remove_cond_format_cells(&mut cx.sheet_mut(dest_sheet)?.cond_formats, &[tile]);
+                    for cf in &rules {
+                        let pieces: Vec<RangeRef> = cf
+                            .ranges
+                            .iter()
+                            .filter_map(|r| r.intersection(&src))
+                            .filter_map(|i| {
+                                let (dr, dc) = (i.start.row as i64 - src.start.row as i64, i.start.col as i64 - src.start.col as i64);
+                                let (er, ec) = (i.end.row as i64 - src.start.row as i64, i.end.col as i64 - src.start.col as i64);
+                                Some(RangeRef::new(origin.offset(dr, dc)?, origin.offset(er, ec)?))
+                            })
+                            .collect();
+                        let (Some(anchor), Some(first)) = (cf.ranges.first().map(|r| r.start), pieces.first().map(|r| r.start)) else { continue };
+                        let (rule, formulas) = super::data::move_cf_rule(&cf.rule, anchor, first);
+                        cf_formulas |= formulas;
+                        pasted.push(gridcraft_model::CondFormat { ranges: pieces, rule, priority: 0, stop_if_true: cf.stop_if_true });
+                    }
+                }
+            }
+            if !pasted.is_empty() {
+                // Pasted rules rank above the destination's, in the order they were copied.
+                let sh = cx.sheet_mut(dest_sheet)?;
+                let n = pasted.len() as u32;
+                for cf in sh.cond_formats.iter_mut() {
+                    cf.priority = cf.priority.saturating_add(n);
+                }
+                for (i, cf) in pasted.iter_mut().enumerate() {
+                    cf.priority = i as u32 + 1;
+                }
+                sh.cond_formats.splice(0..0, pasted);
+            }
+        }
         // Merged areas inside the copied block travel with it.
         if matches!(what, What::All | What::Formats) && !transpose {
             let merges: Vec<RangeRef> = src_sheet.merges.iter().filter(|m| src.contains_range(m)).copied().collect();
@@ -1264,12 +1311,13 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
         *cx.sel = crate::Selection { active: at, anchor: at, ranges: vec![RangeRef::new(at, end)] };
         Ok(())
     })?;
-    // Formulas and validation from an untrusted file leave the destination untrusted; plain values,
-    // formats (cell styles and merged areas, no conditional formats), column widths and notes
-    // carry nothing active. A linked paste writes a formula into every cell whatever `what` says,
-    // except for column widths and notes, which write no cells at all.
-    let passive =
-        matches!(what, What::ColumnWidths | What::Comments) || (!link && matches!(what, What::Formats | What::Values | What::ValuesAndNumberFormats));
+    // Formulas and validation from an untrusted file leave the destination untrusted, as do
+    // conditional formats that hold formulas; plain values, formats (cell styles, merged areas and
+    // conditional formats without formulas), column widths and notes carry nothing active. A linked
+    // paste writes a formula into every cell whatever `what` says, except for column widths and
+    // notes, which write no cells at all.
+    let passive = matches!(what, What::ColumnWidths | What::Comments)
+        || (!link && matches!(what, What::Formats | What::Values | What::ValuesAndNumberFormats) && !cf_formulas);
     if !same_doc && !passive {
         let d = s.doc_mut()?;
         d.trust = d.trust.receive(clip.trust);
