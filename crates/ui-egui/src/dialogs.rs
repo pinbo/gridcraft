@@ -53,7 +53,10 @@ pub struct Dialog {
 /// reference at the caret instead of selecting it, and a drag grows it into a range.
 #[derive(Clone, Debug)]
 struct RefPick {
+    /// The box grid clicks go to: the last of `keys` that had the keyboard.
     key: &'static str,
+    /// Every box of the dialog that takes references (the second value of "between" too).
+    keys: &'static [&'static str],
     /// The sheet the dialog was opened on, by name: its index changes when sheets are inserted or
     /// moved while the dialog is open. References to another sheet carry that sheet's name.
     sheet: String,
@@ -755,7 +758,9 @@ impl Dialog {
                     fields,
                     json!({"preset": "lightRedFillDarkRedText", "period": "today"}),
                 );
-                if ty == "expression" {
+                if ty == "expression" || ty == "cellIs" {
+                    let (key, keys): (&'static str, &'static [&'static str]) =
+                        if ty == "expression" { ("formula", &["formula"]) } else { ("value", &["value", "value2"]) };
                     let (sheet, applies_to) = app
                         .session
                         .active()
@@ -766,7 +771,7 @@ impl Dialog {
                             )
                         })
                         .unwrap_or_default();
-                    d.pick = Some(RefPick { key: "formula", sheet, caret: 0, point: None, anchor: CellRef::new(0, 0), refocus: false, applies_to });
+                    d.pick = Some(RefPick { key, keys, sheet, caret: 0, point: None, anchor: CellRef::new(0, 0), refocus: false, applies_to });
                 }
                 d.values.insert("type".into(), json!(ty));
                 d.values.insert("operator".into(), p("operator"));
@@ -1737,6 +1742,11 @@ fn track_pick(pick: &mut RefPick, r: &egui::Response, typed: bool) {
 fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
     // Field labels, choices and notes are English source strings, translated as they are drawn.
     let lang = crate::i18n::current(ui.ctx());
+    // Only the first box takes the keyboard when the form opens (a later one asking too would win).
+    let first_box = d.fields.iter().find_map(|f| match f {
+        Field::Text { key, .. } | Field::Number { key, .. } => Some(*key),
+        _ => None,
+    });
     egui::Grid::new("form").num_columns(1).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
         for f in d.fields.clone() {
             match f {
@@ -1754,9 +1764,17 @@ fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
                         } else {
                             ui.add(egui::TextEdit::singleline(&mut s).desired_width(320.0))
                         };
-                        take_first_focus(d, &r);
+                        if first_box == Some(key) {
+                            take_first_focus(d, &r);
+                        }
                         if r.changed() {
                             d.values.insert(key.into(), json!(s));
+                        }
+                        // Grid clicks go to whichever of the dialog's reference boxes was used last.
+                        if let Some(pick) = d.pick.as_mut().filter(|pick| pick.key != key && pick.keys.contains(&key) && r.has_focus()) {
+                            pick.key = key;
+                            pick.caret = s.chars().count();
+                            pick.point = None;
                         }
                         if let Some(pick) = d.pick.as_mut().filter(|pick| pick.key == key) {
                             track_pick(pick, &r, r.changed());
@@ -1781,7 +1799,9 @@ fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
                         // Typed values count straight away: otherwise Enter or OK in the same frame
                         // confirms the old value, because a number field only commits when it loses focus.
                         let r = ui.add(egui::DragValue::new(&mut n).speed(0.5).update_while_editing(true));
-                        take_first_focus(d, &r);
+                        if first_box == Some(key) {
+                            take_first_focus(d, &r);
+                        }
                         if r.changed() {
                             d.values.insert(key.into(), json!(n));
                         }
