@@ -13,6 +13,7 @@ use std::fmt::Write as _;
 use serde_json::Value;
 
 fn main() {
+    craft_fonts();
     // Read when the script runs: `env!` would keep the path from when the script was compiled,
     // which goes stale if the checkout moves (and a missing file reruns the script every build).
     let manifest = std::env::var_os("CARGO_MANIFEST_DIR").map(std::path::PathBuf::from).unwrap_or_default();
@@ -105,4 +106,48 @@ fn generate(json: &Value, people: &toml::Table) -> String {
     }
     let _ = writeln!(o, "];");
     o
+}
+
+/// Embeds the Carlito faces of the optional craft-fonts checkout (`CRAFT_FONTS_DIR`, see craftrules
+/// standards/fonts.md) so a build with no system fonts (the web) still has real bold and italic.
+/// Nothing else from craft-fonts is embedded here: the Japanese faces alone are ~24 MB.
+/// Without the variable the table is empty and the app builds and runs as before.
+fn craft_fonts() {
+    const FAMILIES: &[&str] = &["Carlito"];
+    println!("cargo::rerun-if-env-changed=CRAFT_FONTS_DIR");
+    println!("cargo::rerun-if-env-changed=CRAFT_FONTS_REQUIRED");
+    let mut src = String::from("pub static CRAFT_FONTS: &[CraftFont] = &[\n");
+    if let Some(dir) = std::env::var_os("CRAFT_FONTS_DIR").map(std::path::PathBuf::from) {
+        match craft_font_entries(&dir, FAMILIES) {
+            Ok(entries) => src.push_str(&entries),
+            Err(e) if std::env::var_os("CRAFT_FONTS_REQUIRED").is_some() => println!("cargo::error=CRAFT_FONTS_DIR={}: {e}", dir.display()),
+            Err(e) => println!("cargo::warning=building without craft-fonts: CRAFT_FONTS_DIR={}: {e}", dir.display()),
+        }
+    }
+    src.push_str("];\n");
+    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap_or_default()).join("craft_fonts.rs");
+    if let Err(e) = std::fs::write(&out, src) {
+        println!("cargo::error=writing {}: {e}", out.display());
+    }
+}
+
+/// One `CraftFont { .. }` initialiser per manifest line of the wanted families.
+fn craft_font_entries(dir: &std::path::Path, families: &[&str]) -> Result<String, String> {
+    let manifest = dir.join("fonts/manifest.txt");
+    println!("cargo::rerun-if-changed={}", manifest.display());
+    let text = std::fs::read_to_string(&manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
+    let mut out = String::new();
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        let f: Vec<&str> = line.split(" | ").map(str::trim).collect();
+        let [family, style, file, ..] = f.as_slice() else {
+            return Err(format!("malformed manifest line: {line}"));
+        };
+        if !families.contains(family) {
+            continue;
+        }
+        let path = dir.join(file).canonicalize().map_err(|e| format!("{file}: {e}"))?;
+        println!("cargo::rerun-if-changed={}", path.display());
+        let _ = writeln!(out, "    CraftFont {{ family: {family:?}, style: {style:?}, bytes: include_bytes!({:?}) }},", path.display().to_string());
+    }
+    Ok(out)
 }

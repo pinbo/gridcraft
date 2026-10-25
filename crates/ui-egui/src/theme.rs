@@ -412,6 +412,18 @@ pub(crate) fn drop_unparseable_fonts(fonts: &mut FontDefinitions) {
     }
 }
 
+/// The craft-fonts Carlito face for a cell or bold interface role, if this build embeds it.
+fn embedded_role_face(role: &str) -> Option<FontData> {
+    let style = match role {
+        CELL => "Regular",
+        CELL_BOLD | UI_BOLD => "Bold",
+        CELL_ITALIC => "Italic",
+        CELL_BOLD_ITALIC => "Bold Italic",
+        _ => return None,
+    };
+    crate::craft_fonts::face("Carlito", style).map(FontData::from_static)
+}
+
 #[cfg(target_arch = "wasm32")]
 fn try_load(_paths: &[(&str, u32)]) -> Option<FontData> {
     None
@@ -587,7 +599,8 @@ pub fn font_definitions_with(language: crate::i18n::Language, used: &[String]) -
         let paths = candidates(role);
         let refs: Vec<(&str, u32)> = paths.iter().map(|(p, i)| (p.as_str(), *i)).collect();
         let mut chain: Vec<String> = Vec::new();
-        if let Some(mut fd) = try_load(&refs) {
+        // No system face (always so on the web): the embedded Carlito one, when built with craft-fonts.
+        if let Some(mut fd) = try_load(&refs).or_else(|| embedded_role_face(role)) {
             // Helvetica Neue Bold's own TrueType hints close Cyrillic е into ө at 13 pt on a Retina
             // screen (#1184). Core Text never runs them, so this draws it the way macOS does.
             if cfg!(target_os = "macos") && role == UI_BOLD {

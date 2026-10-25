@@ -12,6 +12,7 @@ mod cell_pictures;
 pub mod chartview;
 pub mod code_editor;
 pub mod control;
+pub mod craft_fonts;
 pub mod credits;
 pub mod dialogs;
 pub mod editor;
