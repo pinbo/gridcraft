@@ -2696,6 +2696,23 @@ fn checkboxes_keep_values_toggle_and_delete_in_two_passes() {
 }
 
 #[test]
+fn clear_formats_and_clear_all_remove_conditional_formats_in_the_selection_only() {
+    let mut s = s();
+    for (i, r) in ["A1", "A2", "A3"].iter().enumerate() {
+        s.execute("cell.set", json!({"cell": r, "input": (i + 1).to_string()})).unwrap();
+    }
+    s.execute("home.conditionalFormat", json!({"range": "A1:A3", "rule": {"type": "colorScale"}})).unwrap();
+    let ranges = |s: &Session| -> Vec<String> {
+        s.doc().unwrap().wb.sheet(0).unwrap().cond_formats.iter().flat_map(|c| c.ranges.iter().map(|r| r.a1())).collect()
+    };
+    assert_eq!(ranges(&s), ["A1:A3"]);
+    s.execute("edit.clearFormats", json!({"range": "A2"})).unwrap();
+    assert_eq!(ranges(&s), ["A1", "A3"]);
+    s.execute("edit.clearAll", json!({"range": "A1:A3"})).unwrap();
+    assert!(ranges(&s).is_empty());
+}
+
+#[test]
 fn checkboxes_survive_xlsx_as_cell_controls() {
     let mut s = s();
     s.execute("insert.checkbox", json!({"range": "A1:A2"})).unwrap();

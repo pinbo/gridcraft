@@ -1057,6 +1057,16 @@ pub(super) fn remove_validation_cells(validations: &mut Vec<Validation>, cuts: &
     validations.retain(|d| !d.ranges.is_empty());
 }
 
+/// Removes the cells of `cuts` from every conditional format, keeping the rest of each rule's ranges.
+pub(super) fn remove_cond_format_cells(cond_formats: &mut Vec<gridcraft_model::CondFormat>, cuts: &[RangeRef]) {
+    for cf in cond_formats.iter_mut() {
+        for cut in cuts {
+            cf.ranges = cf.ranges.iter().flat_map(|r| subtract_range(*r, cut)).collect();
+        }
+    }
+    cond_formats.retain(|c| !c.ranges.is_empty());
+}
+
 fn validation(s: &mut Session, p: &Json) -> Result<Json> {
     let ranges = target_ranges(s, p)?;
     let sheet = target_sheet(s, p)?;

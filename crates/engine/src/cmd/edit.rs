@@ -1340,6 +1340,10 @@ fn clear(s: &mut Session, p: &Json, what: &str) -> Result<Json> {
         })
     };
     edit(s, |cx| {
+        if matches!(what, "all" | "formats") {
+            // Conditional formats are formatting too, and may cover cells that hold nothing.
+            super::data::remove_cond_format_cells(&mut cx.sheet_mut(sheet)?.cond_formats, &ranges);
+        }
         for r in &ranges {
             let r = match cx.wb.sheet(sheet).and_then(|sh| sh.used_range()) {
                 Some(u) => match r.intersection(&u) {
