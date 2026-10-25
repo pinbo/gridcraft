@@ -2780,6 +2780,23 @@ fn pasting_formats_from_one_cell_over_a_range_makes_one_rule_over_the_range() {
 }
 
 #[test]
+fn the_format_painter_carries_conditional_formats_over_the_painted_range() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
+    s.execute("home.conditionalFormat", json!({"range": "A1", "rule": {"type": "colorScale"}})).unwrap();
+    s.execute("home.conditionalFormat", json!({"range": "C1:C5", "rule": {"type": "dataBar"}})).unwrap();
+    s.execute("selection.set", json!({"range": "A1"})).unwrap();
+    s.execute("edit.formatPainter", json!({})).unwrap();
+    s.execute("edit.formatPainter", json!({"apply": "C1:C5"})).unwrap();
+    let sh = s.doc().unwrap().wb.sheet(0).unwrap().clone();
+    // The destination's own rule is replaced by one copied scale over the whole range.
+    assert_eq!(sh.cond_formats.len(), 2);
+    let scale = sh.cond_formats.iter().find(|c| matches!(c.rule, gridcraft_model::CfRule::ColorScale { .. })).unwrap();
+    assert_eq!(scale.ranges.iter().map(|r| r.count()).sum::<u64>(), 5);
+    assert!(sh.cond_formats.iter().all(|c| !matches!(c.rule, gridcraft_model::CfRule::DataBar { .. })));
+}
+
+#[test]
 fn checkboxes_survive_xlsx_as_cell_controls() {
     let mut s = s();
     s.execute("insert.checkbox", json!({"range": "A1:A2"})).unwrap();
