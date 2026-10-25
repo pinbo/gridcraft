@@ -1,0 +1,18 @@
+# Netlify settings for the web build. Build locally and deploy the output:
+#   cd apps/gridcraft-web && CRAFT_FONTS_DIR=/absolute/path/to/craft-fonts trunk build --release
+#   netlify deploy --prod --dir dist/web
+# Netlify's CDN compresses responses (brotli where the browser accepts it) by itself.
+[build]
+  publish = "dist/web"
+
+# Trunk hashes these file names (filehash = true), so they can be cached for good.
+[[headers]]
+  for = "/*_bg.wasm"
+  [headers.values]
+    Content-Type = "application/wasm"
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
