@@ -33,11 +33,10 @@ pub const REQUIRED_FACES: &[(&str, &str, &[&str])] = &[
 pub const CHINESE_FACES: &[(&str, &str, &[&str])] = &[("LXGW WenKai Lite", "Regular", &["Hani", "Hans"])];
 
 /// The explicit web allowlist. Browser builds embed only these faces; the Noto CJK collection, the
-/// Japanese BIZ UDPGothic and Korean NanumGothic faces and the document-only faces stay off the wasm bundle. `Noto Sans Symbols` supplies `⌃`, and
-/// `Noto Sans Symbols 2` supplies `✕`, `◀` and `✓`; `📋` still comes from egui's bundled emoji.
+/// Japanese BIZ UDPGothic and Korean NanumGothic faces and the document-only faces stay off the wasm bundle. `Noto Sans Symbols` supplies `⌃`. `Noto Sans Symbols 2` (about 1.2 MB, for `✕`, `◀`
+/// and `✓`) is left out, so those glyphs may draw as boxes on the web; `📋` still comes from egui's bundled emoji.
 pub const WEB_ALLOWED: &[(&str, &str)] = &[
     ("Noto Sans Symbols", "Regular"),
-    ("Noto Sans Symbols 2", "Regular"),
     // Real bold and italic cell text and a serif face: the web has no system fonts, and egui's bundled ones have none.
     // These come from craft-fonts' opt-in `fonts/latin-manifest.txt`.
     ("Liberation Sans", "Regular"),
@@ -45,6 +44,9 @@ pub const WEB_ALLOWED: &[(&str, &str)] = &[
     ("Liberation Sans", "Italic"),
     ("Liberation Sans", "Bold Italic"),
     ("Liberation Serif", "Regular"),
+    ("Liberation Serif", "Bold"),
+    ("Liberation Serif", "Italic"),
+    ("Liberation Serif", "Bold Italic"),
 ];
 
 /// One validated `fonts/manifest.txt` row. Only the fields GridCraft consumes are kept.
@@ -172,12 +174,14 @@ mod tests {
             WEB_ALLOWED,
             &[
                 ("Noto Sans Symbols", "Regular"),
-                ("Noto Sans Symbols 2", "Regular"),
                 ("Liberation Sans", "Regular"),
                 ("Liberation Sans", "Bold"),
                 ("Liberation Sans", "Italic"),
                 ("Liberation Sans", "Bold Italic"),
                 ("Liberation Serif", "Regular"),
+                ("Liberation Serif", "Bold"),
+                ("Liberation Serif", "Italic"),
+                ("Liberation Serif", "Bold Italic"),
             ]
         );
         for (family, _) in WEB_ALLOWED {

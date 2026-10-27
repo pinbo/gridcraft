@@ -268,7 +268,13 @@ pub const CELL_BOLD: &str = "cell-bold";
 pub const CELL_ITALIC: &str = "cell-italic";
 pub const CELL_BOLD_ITALIC: &str = "cell-bold-italic";
 pub const SERIF: &str = "serif";
+pub const SERIF_BOLD: &str = "serif-bold";
+pub const SERIF_ITALIC: &str = "serif-italic";
+pub const SERIF_BOLD_ITALIC: &str = "serif-bold-italic";
 pub const MONO: &str = "mono";
+
+/// Every role family [`font_definitions`] binds, in order.
+const ALL_ROLES: [&str; 11] = [UI, UI_BOLD, CELL, CELL_BOLD, CELL_ITALIC, CELL_BOLD_ITALIC, SERIF, SERIF_BOLD, SERIF_ITALIC, SERIF_BOLD_ITALIC, MONO];
 
 pub fn ui_font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(UI.into()))
@@ -298,7 +304,15 @@ pub fn cell_family(name: &str, bold: bool, italic: bool) -> FontFamily {
         || lower.contains("serif") && !lower.contains("sans")
         || lower.contains("garamond")
     {
-        return FontFamily::Name(SERIF.into());
+        return FontFamily::Name(
+            match (bold, italic) {
+                (true, true) => SERIF_BOLD_ITALIC,
+                (true, false) => SERIF_BOLD,
+                (false, true) => SERIF_ITALIC,
+                (false, false) => SERIF,
+            }
+            .into(),
+        );
     }
     FontFamily::Name(
         match (bold, italic) {
@@ -419,6 +433,9 @@ fn craft_font_faces() -> Vec<(String, &'static CraftFont)> {
 fn embedded_role_face(role: &str) -> Option<FontData> {
     let (family, style) = match role {
         SERIF => ("Liberation Serif", "Regular"),
+        SERIF_BOLD => ("Liberation Serif", "Bold"),
+        SERIF_ITALIC => ("Liberation Serif", "Italic"),
+        SERIF_BOLD_ITALIC => ("Liberation Serif", "Bold Italic"),
         CELL => ("Liberation Sans", "Regular"),
         CELL_BOLD | UI_BOLD => ("Liberation Sans", "Bold"),
         CELL_ITALIC => ("Liberation Sans", "Italic"),
@@ -597,14 +614,20 @@ fn candidates(role: &str) -> Vec<(String, u32)> {
             add(format!("/usr/share/fonts/liberation-sans-fonts/{lib}"), 0);
             add(format!("/usr/share/fonts/dejavu-sans-fonts/{dejavu}"), 0);
         }
-        "serif" => {
-            add(format!("{mac_sup}/Times New Roman.ttf"), 0);
-            add(format!("{win}\\times.ttf"), 0);
-            for p in in_dirs(&lin, &["liberation/LiberationSerif-Regular.ttf", "dejavu/DejaVuSerif.ttf"]) {
+        "serif" | "serif-bold" | "serif-italic" | "serif-bold-italic" => {
+            let (mac, win_file, lib, dejavu) = match role {
+                "serif" => ("Times New Roman.ttf", "times.ttf", "LiberationSerif-Regular.ttf", "DejaVuSerif.ttf"),
+                "serif-bold" => ("Times New Roman Bold.ttf", "timesbd.ttf", "LiberationSerif-Bold.ttf", "DejaVuSerif-Bold.ttf"),
+                "serif-italic" => ("Times New Roman Italic.ttf", "timesi.ttf", "LiberationSerif-Italic.ttf", "DejaVuSerif-Italic.ttf"),
+                _ => ("Times New Roman Bold Italic.ttf", "timesbi.ttf", "LiberationSerif-BoldItalic.ttf", "DejaVuSerif-BoldItalic.ttf"),
+            };
+            add(format!("{mac_sup}/{mac}"), 0);
+            add(format!("{win}\\{win_file}"), 0);
+            for p in in_dirs(&lin, &[&format!("liberation/{lib}"), &format!("dejavu/{dejavu}")]) {
                 add(p, 0);
             }
-            add("/usr/share/fonts/liberation-serif-fonts/LiberationSerif-Regular.ttf".into(), 0);
-            add("/usr/share/fonts/dejavu-serif-fonts/DejaVuSerif.ttf".into(), 0);
+            add(format!("/usr/share/fonts/liberation-serif-fonts/{lib}"), 0);
+            add(format!("/usr/share/fonts/dejavu-serif-fonts/{dejavu}"), 0);
         }
         "mono" => {
             add(format!("{mac_sys}/SFNSMono.ttf"), 0);
@@ -682,7 +705,7 @@ fn font_definitions_impl(language: crate::i18n::Language, used: &[String], syste
     // and epaint picks the first face that has the glyph, so they only catch their own scripts.
     let fallback = if system { load_fallback(&mut fonts, HanOrder::of(language)) } else { Vec::new() };
     let hack = fonts.font_data.contains_key(HACK).then_some(HACK);
-    for role in [UI, UI_BOLD, CELL, CELL_BOLD, CELL_ITALIC, CELL_BOLD_ITALIC, SERIF, MONO] {
+    for role in ALL_ROLES {
         let chain = build_role_chain(&mut fonts, role, &base_prop, &base_mono, &fallback, hack, system);
         fonts.families.insert(FontFamily::Name(role.into()), chain);
         bound.push(role.to_string());
@@ -744,6 +767,8 @@ fn build_role_chain(
         chain.push(format!("sys-{UI}"));
     } else if role.starts_with("cell-") {
         chain.push(format!("sys-{CELL}"));
+    } else if role.starts_with("serif-") {
+        chain.push(format!("sys-{SERIF}"));
     }
     chain.extend(if role == MONO { base_mono.to_vec() } else { base_prop.to_vec() });
     // egui bundles Hack, a monospace face rich in arrows, triangles and keyboard symbols, but
@@ -767,7 +792,7 @@ fn bind_cell_fallback(fonts: &mut FontDefinitions, fallback: &[String]) {
     if !fonts.font_data.contains_key(&cell_key) {
         return;
     }
-    for role in [UI, UI_BOLD, SERIF, MONO] {
+    for role in [UI, UI_BOLD, SERIF, SERIF_BOLD, SERIF_ITALIC, SERIF_BOLD_ITALIC, MONO] {
         if let Some(chain) = fonts.families.get_mut(&FontFamily::Name(role.into()))
             && !chain.contains(&cell_key)
         {
@@ -1140,7 +1165,7 @@ mod font_binding_tests {
 
     /// The families [`font_definitions`] always binds, whatever is installed.
     fn always_bound() -> Vec<String> {
-        [UI, UI_BOLD, CELL, CELL_BOLD, CELL_ITALIC, CELL_BOLD_ITALIC, SERIF, MONO].iter().map(|s| s.to_string()).collect()
+        ALL_ROLES.iter().map(|s| s.to_string()).collect()
     }
 
     #[test]
@@ -1298,7 +1323,7 @@ mod tests {
             if fb_keys.is_empty() {
                 return; // no fallback face on this machine (minimal Linux)
             }
-            for role in [UI, UI_BOLD, CELL, CELL_BOLD, CELL_ITALIC, CELL_BOLD_ITALIC, SERIF, MONO] {
+            for role in ALL_ROLES {
                 let chain = fonts.families.get(&FontFamily::Name(role.into())).map(Vec::as_slice).unwrap_or_default();
                 // The optional craft-fonts faces follow the system fallbacks at the very end.
                 let end = chain.iter().rposition(|k| !k.starts_with("craft-")).map_or(0, |i| i + 1);
