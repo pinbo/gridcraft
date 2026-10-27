@@ -647,7 +647,7 @@ fn group_items(sys: DateSystem, by: PivotDateGroup, start: f64, end: f64) -> Vec
             }
         }
         PivotDateGroup::Quarters => v.extend((1..=4).map(|q| format!("Qtr{q}"))),
-        PivotDateGroup::Months => v.extend(MONTHS.iter().map(|m| m.to_string())),
+        PivotDateGroup::Months => v.extend(MONTHS.iter().map(ToString::to_string)),
         PivotDateGroup::Days | PivotDateGroup::None => {
             const DAYS: [u32; 12] = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
             for (m, n) in MONTHS.iter().zip(DAYS) {
@@ -817,6 +817,9 @@ fn table_xml(pt: &PivotTable, idx: usize, cache_id: u32, c: &Cache, fmt_id: &dyn
     }
     if !pt.show_headers {
         s.push_str(" showHeaders=\"0\"");
+    }
+    if !pt.enable_show_details {
+        s.push_str(" enableDrill=\"0\"");
     }
     // `rowGrandTotals` is the grand total row below the report (Excel's "On for Columns"),
     // `colGrandTotals` the grand total column at its right ("On for Rows").
@@ -1282,6 +1285,7 @@ fn read_table(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, id: u32) -> Option<Pivo
     pt.grand_totals_rows = x.flag("colGrandTotals", true);
     pt.grand_totals_cols = x.flag("rowGrandTotals", true);
     pt.show_headers = x.flag("showHeaders", true);
+    pt.enable_show_details = x.flag("enableDrill", true);
     pt.style = x.child("pivotTableStyleInfo").and_then(|s| s.attr("name")).unwrap_or("").to_string();
     if x.child("calculatedItems").is_some() || x.path(&["filters", "filter"]).is_some() {
         cx.warn(format!("PivotTable \"{}\": calculated items and label/value filters are not supported", pt.name));

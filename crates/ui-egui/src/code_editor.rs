@@ -78,6 +78,32 @@ pub fn highlight(text: &str, lang: Lang) -> Vec<(Range<usize>, Token)> {
     }
 }
 
+/// End (exclusive, in chars) of the Python string literal opening with quote `c` at char `i`.
+fn python_string_end(chars: &[(usize, char)], i: usize, c: char) -> usize {
+    let triple = chars.get(i + 1).is_some_and(|(_, d)| *d == c) && chars.get(i + 2).is_some_and(|(_, d)| *d == c);
+    let mut j = if triple { i + 3 } else { i + 1 };
+    loop {
+        match chars.get(j) {
+            None => break,
+            Some((_, '\\')) => j += 2,
+            Some((_, '\n')) if !triple => break,
+            Some((_, d)) if *d == c => {
+                if !triple {
+                    j += 1;
+                    break;
+                }
+                if chars.get(j + 1).is_some_and(|(_, d)| *d == c) && chars.get(j + 2).is_some_and(|(_, d)| *d == c) {
+                    j += 3;
+                    break;
+                }
+                j += 1;
+            }
+            Some(_) => j += 1,
+        }
+    }
+    j.min(chars.len())
+}
+
 fn python(text: &str) -> Vec<(Range<usize>, Token)> {
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     let end_of = |i: usize| chars.get(i).map(|(b, _)| *b).unwrap_or(text.len());
@@ -92,28 +118,7 @@ fn python(text: &str) -> Vec<(Range<usize>, Token)> {
             out.push((start..end_of(j), Token::Comment));
             i = j;
         } else if c == '"' || c == '\'' {
-            let triple = chars.get(i + 1).is_some_and(|(_, d)| *d == c) && chars.get(i + 2).is_some_and(|(_, d)| *d == c);
-            let mut j = if triple { i + 3 } else { i + 1 };
-            loop {
-                match chars.get(j) {
-                    None => break,
-                    Some((_, '\\')) => j += 2,
-                    Some((_, '\n')) if !triple => break,
-                    Some((_, d)) if *d == c => {
-                        if !triple {
-                            j += 1;
-                            break;
-                        }
-                        if chars.get(j + 1).is_some_and(|(_, d)| *d == c) && chars.get(j + 2).is_some_and(|(_, d)| *d == c) {
-                            j += 3;
-                            break;
-                        }
-                        j += 1;
-                    }
-                    Some(_) => j += 1,
-                }
-            }
-            let j = j.min(chars.len());
+            let j = python_string_end(&chars, i, c);
             out.push((start..end_of(j), Token::String));
             i = j;
         } else if c.is_ascii_digit() || (c == '.' && chars.get(i + 1).is_some_and(|(_, d)| d.is_ascii_digit())) {
@@ -551,7 +556,10 @@ pub fn code_editor(ui: &mut Ui, id: egui::Id, text: &mut String, lang: Lang, max
                 let caret = out.galley.pos_from_cursor(CCursor::new(e.caret)).translate(out.galley_pos.to_vec2());
                 ui.scroll_to_rect(caret, None);
             }
-            let mut r = out.response.response;
+            // The field has no visible label; name it for screen readers and the strict
+            // kittest accessibility check. The editor is a generic code field, so the name is
+            // not part of the UI's translated strings.
+            let mut r = out.response.response.accessible_name("Code Editor");
             if edited.is_some() {
                 r.mark_changed();
             }
@@ -667,17 +675,15 @@ mod tests {
     }
 
     #[test]
+    /// Shift+Tab removes four leading spaces, while a plain Tab still inserts four spaces at the caret.
     fn shift_tab_in_the_editor_dedents_rather_than_indents() {
         let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(400.0, 300.0)).build_ui_state(
             |ui, text: &mut String| {
                 if ui.ctx().cumulative_pass_nr() == 0 {
-                    let mut fonts = egui::FontDefinitions::default();
-                    let mono = fonts.families.get(&egui::FontFamily::Monospace).cloned().unwrap_or_default();
-                    fonts.families.insert(egui::FontFamily::Name(theme::MONO.into()), mono);
-                    ui.ctx().set_fonts(fonts);
+                    ui.ctx().set_fonts(theme::pinned_font_definitions());
                     return;
                 }
-                let id = egui::Id::new("code");
+                let id = egui::Id::unique("code");
                 ui.memory_mut(|m| m.request_focus(id));
                 code_editor(ui, id, text, Lang::Python, 5);
             },
@@ -694,14 +700,12 @@ mod tests {
         assert_eq!(h.state(), "    x    ");
     }
 
-    /// Gives the context the editor's monospace family (the test has no craft fonts).
+    /// Gives the context the deterministic font set, including the editor's monospace family.
     fn install_mono(ctx: &egui::Context) {
-        let mut fonts = egui::FontDefinitions::default();
-        let mono = fonts.families.get(&egui::FontFamily::Monospace).cloned().unwrap_or_default();
-        fonts.families.insert(egui::FontFamily::Name(theme::MONO.into()), mono);
-        ctx.set_fonts(fonts);
+        ctx.set_fonts(theme::pinned_font_definitions());
     }
 
+    /// Builds a 400x300 code-editor harness with pinned mono fonts, focus, two passes and an accessibility check.
     fn editor_harness(text: &str) -> egui_kittest::Harness<'static, String> {
         let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(400.0, 300.0)).build_ui_state(
             |ui, text: &mut String| {
@@ -709,13 +713,14 @@ mod tests {
                     install_mono(ui.ctx());
                     return;
                 }
-                let id = egui::Id::new("code");
+                let id = egui::Id::unique("code");
                 ui.memory_mut(|m| m.request_focus(id));
                 code_editor(ui, id, text, Lang::Python, 5);
             },
             text.to_string(),
         );
         h.run_steps(2);
+        h.check_accessibility();
         h
     }
 
@@ -869,9 +874,10 @@ mod tests {
     }
 
     #[test]
+    /// Events held by the previous pass are applied once in the next pass; older held events are dropped and cleared.
     fn held_back_events_land_in_the_next_pass_only() {
         let mut h = editor_harness("");
-        let id = egui::Id::new("code");
+        let id = egui::Id::unique("code");
         let held = |pass, c: &str| Held { pass, events: vec![egui::Event::Text(c.into())] };
         // What the pass just completed held back comes in with the next one.
         let last = h.ctx.cumulative_pass_nr() - 1;
@@ -886,6 +892,7 @@ mod tests {
     }
 
     #[test]
+    /// Held keyboard input does not land in the next focused text field once the code editor has lost focus.
     fn held_back_events_go_nowhere_once_the_editor_lost_the_focus() {
         // Typed into the editor, they must not land in whatever has the focus next.
         let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(400.0, 300.0)).build_ui_state(
@@ -894,10 +901,10 @@ mod tests {
                     install_mono(ui.ctx());
                     return;
                 }
-                let (code, other) = (egui::Id::new("code"), egui::Id::new("other"));
+                let (code, other) = (egui::Id::unique("code"), egui::Id::unique("other"));
                 ui.memory_mut(|m| m.request_focus(if s.2 { code } else { other }));
                 code_editor(ui, code, &mut s.0, Lang::Python, 5);
-                ui.add(TextEdit::singleline(&mut s.1).id(other));
+                ui.add(TextEdit::singleline(&mut s.1).id(other)).accessible_name("Other field");
             },
             (String::new(), String::new(), true),
         );
@@ -911,6 +918,7 @@ mod tests {
     }
 
     #[test]
+    /// A discard-triggered repeat pass receives held keys with the selection made by the first pass.
     fn a_repeat_pass_of_the_frame_counts_as_the_next_pass() {
         // When a widget asks egui to discard and repeat the pass, the repeat pass gets the
         // held-back keys, with the selection the field made in the first pass.
@@ -920,7 +928,7 @@ mod tests {
                     install_mono(ui.ctx());
                     return;
                 }
-                let id = egui::Id::new("code");
+                let id = egui::Id::unique("code");
                 ui.memory_mut(|m| m.request_focus(id));
                 code_editor(ui, id, &mut s.0, Lang::Python, 5);
                 if std::mem::take(&mut s.1) {

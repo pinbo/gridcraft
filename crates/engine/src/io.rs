@@ -209,7 +209,7 @@ fn part_too_large_message(name: &str, part: &str, size: u64) -> String {
 
 /// A CSV opens as a sheet named after the file (like Excel).
 fn rename_first_sheet(wb: &mut Workbook, path: &str) {
-    let stem = std::path::Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or("Sheet1");
+    let stem = std::path::Path::new(path).file_stem().and_then(std::ffi::OsStr::to_str).unwrap_or("Sheet1");
     let clean: String = stem.chars().filter(|c| !matches!(c, ':' | '\\' | '/' | '?' | '*' | '[' | ']')).take(31).collect();
     let clean = clean.trim_matches('\'').to_string();
     // "History" is reserved (see `Workbook::check_sheet_name`): keep the default name instead.
@@ -226,7 +226,7 @@ pub fn save_bytes(wb: &Workbook, path: &str) -> Result<Vec<u8>> {
     // An unknown or missing extension is refused rather than written as an XLSX under that name:
     // a typo like `.cvs` would otherwise produce a file no other app recognises.
     let Some(kind) = FileKind::from_path(path) else {
-        let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path);
+        let name = std::path::Path::new(path).file_name().and_then(std::ffi::OsStr::to_str).unwrap_or(path);
         return Err(EngineError::Other(format!("{name}: unknown file format. Save as .xlsx, .csv, .tsv, .json or .html.")));
     };
     save_bytes_as(wb, path, kind)
@@ -234,12 +234,12 @@ pub fn save_bytes(wb: &Workbook, path: &str) -> Result<Vec<u8>> {
 
 /// Encodes a workbook as `kind`, whatever `path`'s extension says.
 pub fn save_bytes_as(wb: &Workbook, path: &str, kind: FileKind) -> Result<Vec<u8>> {
-    let sheet = wb.active_sheet;
+    let sheet = wb.active_sheet();
     match kind {
         // The extension picks the package kind; only the macro-enabled kinds (.xlsm, .xltm) carry
         // the VBA project, so any other name saves without it, as Excel does.
         FileKind::Xlsx => {
-            let book = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            let book = std::path::Path::new(path).file_name().and_then(std::ffi::OsStr::to_str).unwrap_or_default();
             gridcraft_xlsx::write_xlsx_named(wb, gridcraft_xlsx::XlsxKind::from_path(path), book).map_err(|e| EngineError::Other(e.to_string()))
         }
         FileKind::Xls => {
@@ -770,7 +770,7 @@ mod tests {
     fn save_fails_upfront_when_the_temp_name_is_taken() {
         // Another local user who can write the directory must not be able to point the
         // save's predictable temporary name at their own file: creation is exclusive.
-        let dir = std::env::temp_dir().join("gridcraft-fs-safety");
+        let dir = std::env::temp_dir().join(format!("gridcraft-fs-safety-temp-name-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let victim = dir.join("victim.txt");
@@ -788,7 +788,7 @@ mod tests {
     #[test]
     fn save_keeps_the_destination_access_restrictions() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join("gridcraft-fs-safety");
+        let dir = std::env::temp_dir().join(format!("gridcraft-fs-safety-permissions-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let dest = dir.join("private.xlsx");
@@ -808,7 +808,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn open_refuses_directories_and_unknowable_lengths() {
-        let dir = std::env::temp_dir().join("gridcraft-fs-safety");
+        let dir = std::env::temp_dir().join(format!("gridcraft-fs-safety-open-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         assert!(read_file(dir.to_str().unwrap()).is_err(), "a directory is not a regular file");
