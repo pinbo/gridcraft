@@ -32,20 +32,17 @@ pub const REQUIRED_FACES: &[(&str, &str, &[&str])] = &[
 /// the manifest, so only `CRAFT_FONTS_REQUIRED=1` builds demand it.
 pub const CHINESE_FACES: &[(&str, &str, &[&str])] = &[("LXGW WenKai Lite", "Regular", &["Hani", "Hans"])];
 
-/// The explicit web allowlist. Browser builds embed only these faces; the Noto CJK collection and
-/// the document-only faces stay off the wasm bundle. `Noto Sans Symbols` supplies `⌃`, and
+/// The explicit web allowlist. Browser builds embed only these faces; the Noto CJK collection, the
+/// Japanese BIZ UDPGothic and NanumGothic faces and the document-only faces stay off the wasm bundle. `Noto Sans Symbols` supplies `⌃`, and
 /// `Noto Sans Symbols 2` supplies `✕`, `◀` and `✓`; `📋` still comes from egui's bundled emoji.
 pub const WEB_ALLOWED: &[(&str, &str)] = &[
-    ("BIZ UDPGothic", "Regular"),
-    ("BIZ UDPGothic", "Bold"),
-    ("NanumGothic", "Regular"),
     ("Noto Sans Symbols", "Regular"),
     ("Noto Sans Symbols 2", "Regular"),
     // Real bold and italic cell text: the web has no system fonts, and egui's bundled ones have none.
-    ("Carlito", "Regular"),
-    ("Carlito", "Bold"),
-    ("Carlito", "Italic"),
-    ("Carlito", "Bold Italic"),
+    ("GridCraft Sans", "Regular"),
+    ("GridCraft Sans", "Bold"),
+    ("GridCraft Sans", "Italic"),
+    ("GridCraft Sans", "Bold Italic"),
 ];
 
 /// One validated `fonts/manifest.txt` row. Only the fields GridCraft consumes are kept.
@@ -172,21 +169,18 @@ mod tests {
         assert_eq!(
             WEB_ALLOWED,
             &[
-                ("BIZ UDPGothic", "Regular"),
-                ("BIZ UDPGothic", "Bold"),
-                ("NanumGothic", "Regular"),
                 ("Noto Sans Symbols", "Regular"),
                 ("Noto Sans Symbols 2", "Regular"),
-                ("Carlito", "Regular"),
-                ("Carlito", "Bold"),
-                ("Carlito", "Italic"),
-                ("Carlito", "Bold Italic"),
+                ("GridCraft Sans", "Regular"),
+                ("GridCraft Sans", "Bold"),
+                ("GridCraft Sans", "Italic"),
+                ("GridCraft Sans", "Bold Italic"),
             ]
         );
         for (family, _) in WEB_ALLOWED {
             assert!(!barred(family), "{family} must not be barred");
-            // Carlito is optional: a build without it falls back to egui's faces, with no bold or italic.
-            assert!(*family == "Carlito" || REQUIRED_FACES.iter().any(|(f, _, _)| f == family), "{family} must be a required face");
+            // GridCraft Sans (a Carlito subset) is optional: a build without it falls back to egui's faces, with no bold or italic.
+            assert!(*family == "GridCraft Sans" || REQUIRED_FACES.iter().any(|(f, _, _)| f == family), "{family} must be a required face");
         }
         assert!(!WEB_ALLOWED.iter().any(|(family, _)| family.contains("CJK")), "the web allowlist must contain no CJK collection face");
     }
@@ -272,6 +266,6 @@ mod tests {
         let native: Vec<&str> = embeddable(&rows, false).iter().map(|r| r.family.as_str()).collect();
         let web: Vec<&str> = embeddable(&rows, true).iter().map(|r| r.family.as_str()).collect();
         assert_eq!(native, ["NanumGothic"], "the barred CJK face is never embedded natively");
-        assert_eq!(web, ["NanumGothic"], "the web build keeps only allowlisted faces");
+        assert!(web.is_empty(), "the web build keeps only allowlisted faces");
     }
 }
