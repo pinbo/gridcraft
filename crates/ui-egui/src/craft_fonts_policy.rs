@@ -33,16 +33,18 @@ pub const REQUIRED_FACES: &[(&str, &str, &[&str])] = &[
 pub const CHINESE_FACES: &[(&str, &str, &[&str])] = &[("LXGW WenKai Lite", "Regular", &["Hani", "Hans"])];
 
 /// The explicit web allowlist. Browser builds embed only these faces; the Noto CJK collection, the
-/// Japanese BIZ UDPGothic and NanumGothic faces and the document-only faces stay off the wasm bundle. `Noto Sans Symbols` supplies `⌃`, and
+/// Japanese BIZ UDPGothic and Korean NanumGothic faces and the document-only faces stay off the wasm bundle. `Noto Sans Symbols` supplies `⌃`, and
 /// `Noto Sans Symbols 2` supplies `✕`, `◀` and `✓`; `📋` still comes from egui's bundled emoji.
 pub const WEB_ALLOWED: &[(&str, &str)] = &[
     ("Noto Sans Symbols", "Regular"),
     ("Noto Sans Symbols 2", "Regular"),
-    // Real bold and italic cell text: the web has no system fonts, and egui's bundled ones have none.
-    ("GridCraft Sans", "Regular"),
-    ("GridCraft Sans", "Bold"),
-    ("GridCraft Sans", "Italic"),
-    ("GridCraft Sans", "Bold Italic"),
+    // Real bold and italic cell text and a serif face: the web has no system fonts, and egui's bundled ones have none.
+    // These come from craft-fonts' opt-in `fonts/latin-manifest.txt`.
+    ("Liberation Sans", "Regular"),
+    ("Liberation Sans", "Bold"),
+    ("Liberation Sans", "Italic"),
+    ("Liberation Sans", "Bold Italic"),
+    ("Liberation Serif", "Regular"),
 ];
 
 /// One validated `fonts/manifest.txt` row. Only the fields GridCraft consumes are kept.
@@ -171,16 +173,17 @@ mod tests {
             &[
                 ("Noto Sans Symbols", "Regular"),
                 ("Noto Sans Symbols 2", "Regular"),
-                ("GridCraft Sans", "Regular"),
-                ("GridCraft Sans", "Bold"),
-                ("GridCraft Sans", "Italic"),
-                ("GridCraft Sans", "Bold Italic"),
+                ("Liberation Sans", "Regular"),
+                ("Liberation Sans", "Bold"),
+                ("Liberation Sans", "Italic"),
+                ("Liberation Sans", "Bold Italic"),
+                ("Liberation Serif", "Regular"),
             ]
         );
         for (family, _) in WEB_ALLOWED {
             assert!(!barred(family), "{family} must not be barred");
-            // GridCraft Sans (a Carlito subset) is optional: a build without it falls back to egui's faces, with no bold or italic.
-            assert!(*family == "GridCraft Sans" || REQUIRED_FACES.iter().any(|(f, _, _)| f == family), "{family} must be a required face");
+            // The Liberation faces (from latin-manifest.txt) are optional: a build without them falls back to egui's faces, with no bold or italic.
+            assert!(family.starts_with("Liberation ") || REQUIRED_FACES.iter().any(|(f, _, _)| f == family), "{family} must be a required face");
         }
         assert!(!WEB_ALLOWED.iter().any(|(family, _)| family.contains("CJK")), "the web allowlist must contain no CJK collection face");
     }
