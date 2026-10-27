@@ -47,6 +47,10 @@ pub const WEB_ALLOWED: &[(&str, &str)] = &[
     ("Liberation Serif", "Bold"),
     ("Liberation Serif", "Italic"),
     ("Liberation Serif", "Bold Italic"),
+    ("Liberation Mono", "Regular"),
+    ("Liberation Mono", "Bold"),
+    ("Liberation Mono", "Italic"),
+    ("Liberation Mono", "Bold Italic"),
 ];
 
 /// One validated `fonts/manifest.txt` row. Only the fields GridCraft consumes are kept.
@@ -182,6 +186,10 @@ mod tests {
                 ("Liberation Serif", "Bold"),
                 ("Liberation Serif", "Italic"),
                 ("Liberation Serif", "Bold Italic"),
+                ("Liberation Mono", "Regular"),
+                ("Liberation Mono", "Bold"),
+                ("Liberation Mono", "Italic"),
+                ("Liberation Mono", "Bold Italic"),
             ]
         );
         for (family, _) in WEB_ALLOWED {

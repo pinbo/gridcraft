@@ -272,9 +272,27 @@ pub const SERIF_BOLD: &str = "serif-bold";
 pub const SERIF_ITALIC: &str = "serif-italic";
 pub const SERIF_BOLD_ITALIC: &str = "serif-bold-italic";
 pub const MONO: &str = "mono";
+pub const MONO_BOLD: &str = "mono-bold";
+pub const MONO_ITALIC: &str = "mono-italic";
+pub const MONO_BOLD_ITALIC: &str = "mono-bold-italic";
 
 /// Every role family [`font_definitions`] binds, in order.
-const ALL_ROLES: [&str; 11] = [UI, UI_BOLD, CELL, CELL_BOLD, CELL_ITALIC, CELL_BOLD_ITALIC, SERIF, SERIF_BOLD, SERIF_ITALIC, SERIF_BOLD_ITALIC, MONO];
+const ALL_ROLES: [&str; 14] = [
+    UI,
+    UI_BOLD,
+    CELL,
+    CELL_BOLD,
+    CELL_ITALIC,
+    CELL_BOLD_ITALIC,
+    SERIF,
+    SERIF_BOLD,
+    SERIF_ITALIC,
+    SERIF_BOLD_ITALIC,
+    MONO,
+    MONO_BOLD,
+    MONO_ITALIC,
+    MONO_BOLD_ITALIC,
+];
 
 pub fn ui_font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(UI.into()))
@@ -296,7 +314,15 @@ pub fn cell_family(name: &str, bold: bool, italic: bool) -> FontFamily {
     }
     let lower = name.to_ascii_lowercase();
     if lower.contains("courier") || lower.contains("mono") || lower.contains("consolas") {
-        return FontFamily::Name(MONO.into());
+        return FontFamily::Name(
+            match (bold, italic) {
+                (true, true) => MONO_BOLD_ITALIC,
+                (true, false) => MONO_BOLD,
+                (false, true) => MONO_ITALIC,
+                (false, false) => MONO,
+            }
+            .into(),
+        );
     }
     if lower.contains("times")
         || lower.contains("georgia")
@@ -429,9 +455,13 @@ fn craft_font_faces() -> Vec<(String, &'static CraftFont)> {
         .collect()
 }
 
-/// The craft-fonts Liberation Sans (or Serif) face for a cell, bold interface or serif role, if this build embeds it.
+/// The craft-fonts Liberation Sans, Serif or Mono face for a cell, bold interface, serif or mono role, if this build embeds it.
 fn embedded_role_face(role: &str) -> Option<FontData> {
     let (family, style) = match role {
+        MONO => ("Liberation Mono", "Regular"),
+        MONO_BOLD => ("Liberation Mono", "Bold"),
+        MONO_ITALIC => ("Liberation Mono", "Italic"),
+        MONO_BOLD_ITALIC => ("Liberation Mono", "Bold Italic"),
         SERIF => ("Liberation Serif", "Regular"),
         SERIF_BOLD => ("Liberation Serif", "Bold"),
         SERIF_ITALIC => ("Liberation Serif", "Italic"),
@@ -629,21 +659,33 @@ fn candidates(role: &str) -> Vec<(String, u32)> {
             add(format!("/usr/share/fonts/liberation-serif-fonts/{lib}"), 0);
             add(format!("/usr/share/fonts/dejavu-serif-fonts/{dejavu}"), 0);
         }
-        "mono" => {
-            add(format!("{mac_sys}/SFNSMono.ttf"), 0);
-            add(format!("{mac_sys}/Menlo.ttc"), 0);
-            add(format!("{win}\\consola.ttf"), 0);
-            for p in in_dirs(&lin, &["dejavu/DejaVuSansMono.ttf"]) {
+        "mono" | "mono-bold" | "mono-italic" | "mono-bold-italic" => {
+            // (Menlo.ttc face, Consolas, DejaVu Sans Mono, Liberation Mono); Menlo.ttc holds
+            // Regular, Bold, Italic and Bold Italic in that order.
+            let (menlo, consolas, dejavu, lib) = match role {
+                "mono" => (0, "consola.ttf", "DejaVuSansMono.ttf", "LiberationMono-Regular.ttf"),
+                "mono-bold" => (1, "consolab.ttf", "DejaVuSansMono-Bold.ttf", "LiberationMono-Bold.ttf"),
+                "mono-italic" => (2, "consolai.ttf", "DejaVuSansMono-Oblique.ttf", "LiberationMono-Italic.ttf"),
+                _ => (3, "consolaz.ttf", "DejaVuSansMono-BoldOblique.ttf", "LiberationMono-BoldItalic.ttf"),
+            };
+            if role == "mono" {
+                add(format!("{mac_sys}/SFNSMono.ttf"), 0);
+            }
+            add(format!("{mac_sys}/Menlo.ttc"), menlo);
+            add(format!("{win}\\{consolas}"), 0);
+            for p in in_dirs(&lin, &[&format!("dejavu/{dejavu}")]) {
                 add(p, 0);
             }
-            add("/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf".into(), 0);
+            add(format!("/usr/share/fonts/dejavu-sans-mono-fonts/{dejavu}"), 0);
             // Fedora installs DejaVu Sans Mono only on request. Liberation Mono comes with LibreOffice
             // (in Workstation and KDE by default), Noto Sans Mono (variable, Regular by default) always.
-            for p in in_dirs(&lin, &["liberation/LiberationMono-Regular.ttf"]) {
+            for p in in_dirs(&lin, &[&format!("liberation/{lib}")]) {
                 add(p, 0);
             }
-            add("/usr/share/fonts/liberation-mono-fonts/LiberationMono-Regular.ttf".into(), 0);
-            add("/usr/share/fonts/google-noto-vf/NotoSansMono[wght].ttf".into(), 0);
+            add(format!("/usr/share/fonts/liberation-mono-fonts/{lib}"), 0);
+            if role == "mono" {
+                add("/usr/share/fonts/google-noto-vf/NotoSansMono[wght].ttf".into(), 0);
+            }
         }
         _ => {}
     }
@@ -769,8 +811,10 @@ fn build_role_chain(
         chain.push(format!("sys-{CELL}"));
     } else if role.starts_with("serif-") {
         chain.push(format!("sys-{SERIF}"));
+    } else if role.starts_with("mono-") {
+        chain.push(format!("sys-{MONO}"));
     }
-    chain.extend(if role == MONO { base_mono.to_vec() } else { base_prop.to_vec() });
+    chain.extend(if role.starts_with("mono") { base_mono.to_vec() } else { base_prop.to_vec() });
     // egui bundles Hack, a monospace face rich in arrows, triangles and keyboard symbols, but
     // 0.37 only puts it in the Monospace family. The interface draws ↑, ▲, ▼, ▸, ▾ and ↳ as
     // text (filter menus, ribbon, keytips), so add it behind the UI/cell and emoji faces; it
@@ -792,7 +836,7 @@ fn bind_cell_fallback(fonts: &mut FontDefinitions, fallback: &[String]) {
     if !fonts.font_data.contains_key(&cell_key) {
         return;
     }
-    for role in [UI, UI_BOLD, SERIF, SERIF_BOLD, SERIF_ITALIC, SERIF_BOLD_ITALIC, MONO] {
+    for role in [UI, UI_BOLD, SERIF, SERIF_BOLD, SERIF_ITALIC, SERIF_BOLD_ITALIC, MONO, MONO_BOLD, MONO_ITALIC, MONO_BOLD_ITALIC] {
         if let Some(chain) = fonts.families.get_mut(&FontFamily::Name(role.into()))
             && !chain.contains(&cell_key)
         {
