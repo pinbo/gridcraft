@@ -516,6 +516,7 @@ mod tests {
             app.run("cell.set", json!({"cell": cell, "input": input})).unwrap();
         }
         app.run("selection.set", json!({"range": "A1:A5"})).unwrap();
+        app.run("view.statusBar", json!({"numericalCount": false, "minimum": false, "maximum": false})).unwrap();
         assert_eq!(super::selection_statistics(&app), ["Average: 4", "Count: 4", "Sum: 12"]);
         app.run("view.statusBar", json!({"numericalCount": true, "minimum": true, "maximum": true})).unwrap();
         assert_eq!(super::selection_statistics(&app), ["Average: 4", "Count: 4", "Numerical Count: 3", "Minimum: -1", "Maximum: 9", "Sum: 12"]);

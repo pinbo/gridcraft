@@ -37,16 +37,16 @@ fn right_click(h: &mut Harness, pos: Pos2) {
 }
 
 #[test]
-fn right_clicking_the_status_bar_turns_on_minimum() {
+fn right_clicking_the_status_bar_turns_off_minimum() {
     let mut h = harness();
     assert!(h.query_by_label("Sum: 12").is_some(), "Sum is on by default");
-    assert!(h.query_by_label("Minimum: -1").is_none(), "Minimum is off by default");
+    assert!(h.query_by_label("Minimum: -1").is_some(), "Minimum is on by default");
     // An empty stretch of the 26-point status bar, between the mode text and the statistics.
     right_click(&mut h, pos2(300.0, 787.0));
     h.get_by_label("Minimum").click();
     h.run_steps(4);
-    assert!(h.state().session.prefs.status_bar.minimum);
-    assert!(h.query_by_label("Minimum: -1").is_some(), "the status bar shows the minimum of the selection");
+    assert!(!h.state().session.prefs.status_bar.minimum);
+    assert!(h.query_by_label("Minimum: -1").is_none(), "the status bar no longer shows the minimum");
 }
 
 #[test]

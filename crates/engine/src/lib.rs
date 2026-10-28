@@ -370,8 +370,8 @@ pub struct Prefs {
     pub status_bar: StatusBarStats,
 }
 
-/// The selection statistics shown on the status bar, set with `view.statusBar`. Excel turns on
-/// Average, Count and Sum by default.
+/// The selection statistics shown on the status bar, set with `view.statusBar`. All six are on by
+/// default (Excel turns on only Average, Count and Sum).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct StatusBarStats {
@@ -385,7 +385,7 @@ pub struct StatusBarStats {
 
 impl Default for StatusBarStats {
     fn default() -> Self {
-        StatusBarStats { average: true, count: true, numerical_count: false, minimum: false, maximum: false, sum: true }
+        StatusBarStats { average: true, count: true, numerical_count: true, minimum: true, maximum: true, sum: true }
     }
 }
 
