@@ -235,6 +235,8 @@ pub struct SheetApp {
     /// [`fonts::web_generation`] when the workbook fonts were last bound: fonts the browser gave the
     /// page since then are bound the next frame.
     fonts_web_generation: u64,
+    /// Bind the workbook fonts again even though the names in use did not change (fonts were added).
+    fonts_force_rebind: bool,
     /// Set while a font-set change is pending activation: skip this frame's paint, like the
     /// startup `fonts_ready` gate (egui applies new definitions at the next pass).
     fonts_rebind: bool,

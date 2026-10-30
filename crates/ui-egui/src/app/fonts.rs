@@ -99,7 +99,7 @@ impl SheetApp {
         if generation != self.fonts_web_generation {
             self.fonts_web_generation = generation;
             self.fonts_seen = (u64::MAX, u64::MAX);
-            self.fonts_bound = vec![String::from("\u{0}")];
+            self.fonts_force_rebind = true;
         }
     }
 
@@ -113,9 +113,10 @@ impl SheetApp {
         }
         let used = self.used_fonts();
         self.fonts_seen = seen;
-        if used == self.fonts_bound {
+        if used == self.fonts_bound && !self.fonts_force_rebind {
             return;
         }
+        self.fonts_force_rebind = false;
         ctx.set_fonts(theme::font_definitions_with(self.ui.language, &used));
         self.fonts_bound = used;
         self.fonts_rebind = true;

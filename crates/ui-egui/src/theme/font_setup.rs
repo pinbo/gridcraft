@@ -227,17 +227,9 @@ pub(super) fn craft_font_faces() -> Vec<(String, &'static CraftFont)> {
         .collect()
 }
 
-/// The craft-fonts Liberation Sans, Serif or Mono face for a cell, bold interface, serif or mono role, if this build embeds it.
+/// The craft-fonts Liberation Sans face for a cell or bold interface role, if this build embeds it.
 fn embedded_role_face(role: &str) -> Option<FontData> {
     let (family, style) = match role {
-        MONO => ("Liberation Mono", "Regular"),
-        MONO_BOLD => ("Liberation Mono", "Bold"),
-        MONO_ITALIC => ("Liberation Mono", "Italic"),
-        MONO_BOLD_ITALIC => ("Liberation Mono", "Bold Italic"),
-        SERIF => ("Liberation Serif", "Regular"),
-        SERIF_BOLD => ("Liberation Serif", "Bold"),
-        SERIF_ITALIC => ("Liberation Serif", "Italic"),
-        SERIF_BOLD_ITALIC => ("Liberation Serif", "Bold Italic"),
         CELL => ("Liberation Sans", "Regular"),
         CELL_BOLD | UI_BOLD => ("Liberation Sans", "Bold"),
         CELL_ITALIC => ("Liberation Sans", "Italic"),

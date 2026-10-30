@@ -352,6 +352,19 @@ pub fn families() -> Vec<String> {
     out
 }
 
+/// The font list of the web build: the one embedded family, the fonts the user has added from their
+/// computer ([`add_web_fonts`]) and the fonts `used` by the open workbooks, A–Z. The browser has no
+/// other fonts, so the standard Excel names are not offered; a workbook that names one of them
+/// still lists it. Adding fonts changes the list on the next frame.
+pub fn web_font_list(used: &[String]) -> Vec<String> {
+    let mut names: Vec<String> = vec!["Liberation Sans".into()];
+    names.extend(web_faces().iter().map(|f| f.family.clone()));
+    names.extend(used.iter().filter(|n| !n.trim().is_empty()).cloned());
+    names.sort_by_key(|n| n.to_lowercase());
+    names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    names
+}
+
 /// The egui family name for one role of one family: `fnt:{family}:{b|n}{i|n}`.
 pub fn role_key(family: &str, bold: bool, italic: bool) -> String {
     format!("fnt:{family}:{}{}", if bold { 'b' } else { 'n' }, if italic { 'i' } else { 'n' })
@@ -548,6 +561,20 @@ mod tests {
         // A family with no faces binds nothing and never touches the map.
         assert!(bind_faces(&mut fonts, "No Such Font", &[]).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    /// The web font list holds the embedded family, added fonts and the open files' fonts: sorted, without repeats or blanks.
+    fn the_web_font_list_is_added_fonts_and_the_fonts_in_use() {
+        let used = ["calibri".to_string(), "Zeta".to_string(), "Liberation sans".to_string(), " ".to_string(), "Calibri".to_string()];
+        let list = web_font_list(&used);
+        assert_eq!(list.iter().filter(|n| n.eq_ignore_ascii_case("calibri")).count(), 1);
+        assert_eq!(list.iter().filter(|n| n.eq_ignore_ascii_case("liberation sans")).count(), 1);
+        assert!(list.contains(&"Zeta".to_string()) && !list.iter().any(|n| n.trim().is_empty()));
+        assert!(!list.contains(&"Aptos".to_string()), "the standard names are not offered unless a file uses them");
+        let mut sorted = list.clone();
+        sorted.sort_by_key(|n| n.to_lowercase());
+        assert_eq!(list, sorted);
     }
 
     #[test]

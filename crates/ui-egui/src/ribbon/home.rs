@@ -581,10 +581,10 @@ fn font_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let resp = ui.add_sized([150.0, 24.0], egui::Button::new(egui::RichText::new(&name).font(theme::ui_font(12.5))));
     control_keytip(app, ui, &resp, "home.fontName");
     let forced = invoke(app, "home.fontName");
-    // The browser lists no fonts of its own: there the list also offers the fonts the user has added,
-    // and entries to read the installed ones or pick font files.
+    // The browser lists no fonts of its own: there the list holds the fonts the user has added and the
+    // ones the open files use, then entries to read the installed ones or pick font files.
     let web = app.services.load_system_fonts.is_some() || app.services.add_fonts.is_some();
-    let names: Vec<String> = if web { crate::fonts::families() } else { FONTS.iter().map(ToString::to_string).collect() };
+    let names: Vec<String> = if web { crate::fonts::web_font_list(&app.fonts_bound) } else { FONTS.iter().map(ToString::to_string).collect() };
     let mut items: Vec<(&str, String)> = names.iter().map(|f| (f.as_str(), f.clone())).collect();
     let lang = crate::i18n::current(ui.ctx());
     if app.services.load_system_fonts.is_some() {
