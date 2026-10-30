@@ -66,6 +66,7 @@ impl SheetApp {
             // A font-set change made last frame is active now.
             self.fonts_rebind = false;
         } else if !defer_font_change && !self.prepared_fonts && fonts::scan_done() {
+            self.note_web_fonts();
             self.rebind_workbook_fonts(ctx);
         }
     }
@@ -89,6 +90,17 @@ impl SheetApp {
         self.fonts_seen = (0, 0);
         self.fonts_han = Some(theme::HanOrder::of(self.ui.language));
         ctx.request_repaint();
+    }
+
+    /// Fonts the browser gave the page since the last pass make the workbook's fonts bind again,
+    /// so a cell set in one of them draws with it as soon as it is added.
+    fn note_web_fonts(&mut self) {
+        let generation = fonts::web_generation();
+        if generation != self.fonts_web_generation {
+            self.fonts_web_generation = generation;
+            self.fonts_seen = (u64::MAX, u64::MAX);
+            self.fonts_bound = vec![String::from("\u{0}")];
+        }
     }
 
     /// Binds the workbook's installed fonts once the background scan has finished. Adding fonts

@@ -38,6 +38,11 @@ pub struct Services {
     pub open_async: Option<Box<dyn Fn()>>,
     /// Files delivered asynchronously (name, bytes), opened on the next frame.
     pub inbox: Option<Inbox>,
+    /// Web: let the page read the fonts installed on the computer (the browser asks permission) and
+    /// add them with [`crate::fonts::add_web_fonts`]. `None` hides the font list's entry.
+    pub load_system_fonts: Option<Box<dyn Fn()>>,
+    /// Web: pick font files to add with [`crate::fonts::add_web_fonts`].
+    pub add_fonts: Option<Box<dyn Fn()>>,
     /// Web: hand PDF bytes to the browser's print flow directly (no download,
     /// no intermediate file) — opens the system print dialog on that PDF.
     pub print: Option<PrintPdf>,

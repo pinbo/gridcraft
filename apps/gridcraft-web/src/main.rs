@@ -18,6 +18,8 @@
 
 #[cfg(target_arch = "wasm32")]
 mod host;
+#[cfg(target_arch = "wasm32")]
+mod local_fonts;
 #[cfg(any(target_arch = "wasm32", test))]
 mod prefs;
 #[cfg(target_arch = "wasm32")]

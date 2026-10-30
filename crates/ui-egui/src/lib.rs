@@ -232,6 +232,9 @@ pub struct SheetApp {
     /// The open workbooks' (uid, revision), folded, that `fonts_bound` was computed for, so the
     /// style tables are walked only when a workbook changes.
     fonts_seen: (u64, u64),
+    /// [`fonts::web_generation`] when the workbook fonts were last bound: fonts the browser gave the
+    /// page since then are bound the next frame.
+    fonts_web_generation: u64,
     /// Set while a font-set change is pending activation: skip this frame's paint, like the
     /// startup `fonts_ready` gate (egui applies new definitions at the next pass).
     fonts_rebind: bool,

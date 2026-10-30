@@ -55,7 +55,16 @@ pub fn start() {
                     } else if q.contains("sample") {
                         let _ = session.execute("file.new", serde_json::json!({"sample": "sales"}));
                     }
+                    let font_notes = crate::local_fonts::Notes::default();
                     let mut services = services(inbox.clone(), cc.egui_ctx.clone());
+                    services.load_system_fonts = Some(Box::new({
+                        let (ctx, notes) = (cc.egui_ctx.clone(), font_notes.clone());
+                        move || crate::local_fonts::load_system_fonts(ctx.clone(), notes.clone())
+                    }));
+                    services.add_fonts = Some(Box::new({
+                        let (ctx, notes) = (cc.egui_ctx.clone(), font_notes.clone());
+                        move || crate::local_fonts::add_font_files(ctx.clone(), notes.clone())
+                    }));
                     if let Some(bridge) = &app_bridge {
                         bridge.connect(&mut services, inbox.clone(), cc.egui_ctx.clone());
                     }
@@ -96,7 +105,7 @@ pub fn start() {
                         }
                         bridge.post_ready();
                     }
-                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge, prefs }))
+                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge, prefs, font_notes }))
                 }),
             )
             .await;
@@ -125,6 +134,8 @@ struct WebShell {
     inbox: Inbox,
     bridge: Option<crate::host::Bridge>,
     prefs: crate::prefs::PrefsSync,
+    /// What loading fonts from the computer has to tell the user.
+    font_notes: crate::local_fonts::Notes,
 }
 
 fn local_storage() -> Option<web_sys::Storage> {
@@ -154,6 +165,9 @@ impl eframe::App for WebShell {
             });
         }
         self.app.logic(ctx);
+        if let Some(note) = self.font_notes.borrow_mut().pop() {
+            self.app.toast = Some((note, gridcraft_ui_egui::now_ms()));
+        }
         // Store changed preferences straight away: a reload or closed tab runs no exit code (#1562).
         let changed = self.prefs.changed(&self.app);
         if !changed.is_empty() {

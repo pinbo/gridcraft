@@ -7,8 +7,10 @@
 //! and bind the files a workbook actually uses into the families
 //! [`theme::font_definitions`](crate::theme::font_definitions) assembles.
 //!
-//! Native only: on wasm there are no system fonts, every function here reports "nothing", and the
-//! font list is the standard [`crate::ribbon::FONTS`] set.
+//! Native scans the platform's folders. The browser has no folders to scan: the web build starts
+//! with nothing (the font list is the standard [`crate::ribbon::FONTS`] set) and gains fonts when
+//! the user lets the page read the installed ones or picks font files, which the host hands to
+//! [`add_web_fonts`].
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -20,7 +22,6 @@ use std::sync::OnceLock;
 const MAX_FONT_FILE: u64 = 64 << 20;
 
 /// A face keeps at most this many family names, so a hostile `name` table can't grow the catalog.
-#[cfg(not(target_arch = "wasm32"))]
 const MAX_FAMILY_NAMES: usize = 16;
 
 /// One face of one installed font file.
@@ -41,6 +42,9 @@ pub struct Face {
     pub weight: f32,
     /// Whether the style name reads as italic or oblique.
     pub italic: bool,
+    /// The file's bytes when the face came from the browser (shared by every face of the file);
+    /// `None` for a face read from `path`.
+    pub data: Option<std::sync::Arc<Vec<u8>>>,
 }
 
 /// The font folders of the platform (the system's and the user's). Empty on wasm.
@@ -76,7 +80,6 @@ pub fn system_font_dirs() -> Vec<PathBuf> {
 }
 
 /// Weight implied by a style name (`"Bold"` → 700, `"Light"` → 300).
-#[cfg(not(target_arch = "wasm32"))]
 fn style_weight(style: &str) -> f32 {
     let s: String = style.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect();
     const TABLE: &[(&str, f32)] = &[
@@ -105,7 +108,6 @@ impl Face {
 }
 
 /// Whether a style name reads as italic or oblique.
-#[cfg(not(target_arch = "wasm32"))]
 fn style_italic(style: &str) -> bool {
     let s: String = style.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect();
     s.contains("italic") || s.contains("oblique")
@@ -113,7 +115,6 @@ fn style_italic(style: &str) -> bool {
 
 /// Every face in `data` as `(index, family, names, style)`, where `names` holds every family name
 /// (see [`Face::names`]). Damaged data yields nothing, never a panic.
-#[cfg(not(target_arch = "wasm32"))]
 fn file_faces(data: &[u8]) -> Vec<(u32, String, Vec<String>, String)> {
     use skrifa::raw::FileRef;
     use skrifa::{MetadataProvider, string::StringId};
@@ -174,7 +175,7 @@ pub fn scan_dirs(dirs: &[PathBuf]) -> Vec<Face> {
             }
             let Ok(data) = std::fs::read(&path) else { continue };
             for (index, family, names, style) in file_faces(&data) {
-                out.push(Face { family, names, path: path.clone(), index, weight: style_weight(&style), italic: style_italic(&style) });
+                out.push(Face { family, names, path: path.clone(), index, weight: style_weight(&style), italic: style_italic(&style), data: None });
             }
         }
     }
@@ -186,16 +187,30 @@ pub fn scan_dirs(_dirs: &[PathBuf]) -> Vec<Face> {
     Vec::new()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 static CATALOG: OnceLock<Vec<Face>> = OnceLock::new();
 
 /// The catalog of installed faces, scanned on first use. Blocks until the scan finishes.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn catalog() -> &'static [Face] {
     CATALOG.get_or_init(|| scan_dirs(&system_font_dirs()))
 }
 
 /// The catalog if the scan has finished, else `None` — never blocks, for use while painting.
+#[cfg(not(target_arch = "wasm32"))]
 fn catalog_now() -> Option<&'static [Face]> {
     CATALOG.get().map(Vec::as_slice)
+}
+
+/// The browser's catalog: the fonts the user has let the page read (see [`add_web_fonts`]).
+#[cfg(target_arch = "wasm32")]
+pub fn catalog() -> &'static [Face] {
+    web_faces()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn catalog_now() -> Option<&'static [Face]> {
+    Some(web_faces())
 }
 
 /// Start cataloging the installed fonts on a background thread, so the first frame doesn't wait for
@@ -213,9 +228,63 @@ pub fn start_scan() {
     });
 }
 
-/// Whether the background scan has finished.
+/// Whether the background scan has finished (the browser has nothing to scan).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn scan_done() -> bool {
     CATALOG.get().is_some()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn scan_done() -> bool {
+    true
+}
+
+/// The faces of fonts the browser gave the page. Replaced as a whole when fonts are added, so a
+/// reader holds a stable slice; the replaced one is left allocated (fonts are added a few times
+/// per visit, not per frame).
+static WEB_FACES: std::sync::RwLock<&'static [Face]> = std::sync::RwLock::new(&[]);
+static WEB_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A browser font file bigger than this many bytes is skipped.
+pub const MAX_WEB_FONT_FILE: usize = 64 << 20;
+
+/// The faces added with [`add_web_fonts`].
+pub fn web_faces() -> &'static [Face] {
+    *WEB_FACES.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// How many times [`add_web_fonts`] has added faces: the app re-binds workbook fonts when it changes.
+pub fn web_generation() -> u64 {
+    WEB_GENERATION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Adds the faces of font files the user gave the browser (`(file name, bytes)`) to the web
+/// catalog, so the font list offers them and cells render with them. A face whose family, weight
+/// and slant are already there is skipped, as are files that are not fonts, damaged or over 64 MB.
+/// Returns how many faces were added.
+pub fn add_web_fonts(files: impl IntoIterator<Item = (String, Vec<u8>)>) -> usize {
+    let mut next: Vec<Face> = web_faces().to_vec();
+    let before = next.len();
+    for (file_name, bytes) in files {
+        if bytes.len() > MAX_WEB_FONT_FILE {
+            continue;
+        }
+        let faces = file_faces(&bytes);
+        let data = std::sync::Arc::new(bytes);
+        for (index, family, names, style) in faces {
+            let (weight, italic) = (style_weight(&style), style_italic(&style));
+            if next.iter().any(|f| f.family.eq_ignore_ascii_case(&family) && f.weight == weight && f.italic == italic) {
+                continue;
+            }
+            next.push(Face { family, names, path: PathBuf::from(format!("web:{file_name}")), index, weight, italic, data: Some(data.clone()) });
+        }
+    }
+    let added = next.len() - before;
+    if added > 0 {
+        *WEB_FACES.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Box::leak(next.into_boxed_slice());
+        WEB_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    added
 }
 
 /// The faces of one installed family, by any of its names, regular-weight first (the order roles
@@ -335,7 +404,13 @@ pub fn bind_faces(fonts: &mut egui::FontDefinitions, family: &str, faces: &[Face
                 continue;
             }
             if !fonts.font_data.contains_key(&key) {
-                let Ok(bytes) = std::fs::read(&face.path) else { continue };
+                let bytes = match &face.data {
+                    Some(data) => data.as_ref().clone(),
+                    None => match std::fs::read(&face.path) {
+                        Ok(bytes) => bytes,
+                        Err(_) => continue,
+                    },
+                };
                 let mut fd = egui::FontData::from_owned(bytes);
                 fd.index = face.index;
                 fonts.font_data.insert(key.clone(), std::sync::Arc::new(fd));
@@ -461,7 +536,7 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("temp dir");
         let path = dir.join("Ubuntu-Light.ttf");
         std::fs::write(&path, epaint_default_fonts::UBUNTU_LIGHT).expect("write");
-        let face = Face { family: "Ubuntu".into(), names: vec!["Ubuntu".into()], path, index: 0, weight: 300.0, italic: false };
+        let face = Face { family: "Ubuntu".into(), names: vec!["Ubuntu".into()], path, index: 0, weight: 300.0, italic: false, data: None };
 
         let mut fonts = egui::FontDefinitions::default();
         let bound = bind_faces(&mut fonts, "Ubuntu", std::slice::from_ref(&face));
@@ -473,6 +548,25 @@ mod tests {
         // A family with no faces binds nothing and never touches the map.
         assert!(bind_faces(&mut fonts, "No Such Font", &[]).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    /// A font file the browser hands over is catalogued once, binds into every role like an installed font, and bumps the generation; junk adds nothing.
+    fn fonts_added_from_the_browser_are_catalogued_and_bound() {
+        let before = web_generation();
+        let ubuntu = epaint_default_fonts::UBUNTU_LIGHT.to_vec();
+        let junk = vec![0u8; 100];
+        assert_eq!(add_web_fonts([("junk.ttf".to_string(), junk), ("Ubuntu-Light.ttf".to_string(), ubuntu.clone())]), 1);
+        assert_eq!(web_generation(), before + 1);
+        let faces: Vec<Face> = faces_named(web_faces(), "Ubuntu");
+        assert_eq!(faces.len(), 1);
+        assert!(faces.first().is_some_and(|f| f.data.is_some() && f.path.to_string_lossy().starts_with("web:")));
+        // The same face again changes nothing.
+        assert_eq!(add_web_fonts([("again.ttf".to_string(), ubuntu)]), 0);
+        assert_eq!(web_generation(), before + 1);
+        let mut defs = egui::FontDefinitions::default();
+        assert_eq!(bind_faces(&mut defs, "Ubuntu", &faces).len(), 4);
+        assert!(defs.font_data.keys().any(|k| k.starts_with("fnt-src:web:Ubuntu-Light.ttf")));
     }
 
     /// A font that is just a table directory and a `name` table holding `records` as
@@ -512,7 +606,15 @@ mod tests {
     const KO: u16 = 0x0412;
 
     fn face(family: &str, names: &[&str], path: &str, weight: f32) -> Face {
-        Face { family: family.into(), names: names.iter().map(|s| s.to_string()).collect(), path: path.into(), index: 0, weight, italic: false }
+        Face {
+            family: family.into(),
+            names: names.iter().map(|s| s.to_string()).collect(),
+            path: path.into(),
+            index: 0,
+            weight,
+            italic: false,
+            data: None,
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -599,7 +701,10 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("temp dir");
         let path = dir.join("Ubuntu-Light.ttf");
         std::fs::write(&path, epaint_default_fonts::UBUNTU_LIGHT).expect("write");
-        let f = Face { family: "Ubuntu".into(), names: vec!["Ubuntu".into(), "우분투".into()], path, index: 0, weight: 300.0, italic: false };
+        let f =
+            Face {
+                family: "Ubuntu".into(), names: vec!["Ubuntu".into(), "우분투".into()], path, index: 0, weight: 300.0, italic: false, data: None
+            };
 
         let mut fonts = egui::FontDefinitions::default();
         let before = fonts.font_data.len();

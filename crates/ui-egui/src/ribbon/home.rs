@@ -581,9 +581,32 @@ fn font_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let resp = ui.add_sized([150.0, 24.0], egui::Button::new(egui::RichText::new(&name).font(theme::ui_font(12.5))));
     control_keytip(app, ui, &resp, "home.fontName");
     let forced = invoke(app, "home.fontName");
-    let items: Vec<(&str, String)> = FONTS.iter().map(|f| (*f, f.to_string())).collect();
+    // The browser lists no fonts of its own: there the list also offers the fonts the user has added,
+    // and entries to read the installed ones or pick font files.
+    let web = app.services.load_system_fonts.is_some() || app.services.add_fonts.is_some();
+    let names: Vec<String> = if web { crate::fonts::families() } else { FONTS.iter().map(ToString::to_string).collect() };
+    let mut items: Vec<(&str, String)> = names.iter().map(|f| (f.as_str(), f.clone())).collect();
+    let lang = crate::i18n::current(ui.ctx());
+    if app.services.load_system_fonts.is_some() {
+        items.push(("__loadFonts", lang.tr("Load System Fonts…").to_string()));
+    }
+    if app.services.add_fonts.is_some() {
+        items.push(("__addFonts", lang.tr("Add Font Files…").to_string()));
+    }
     if let ComboResult::Picked(value) = editable_combo(ui, &resp, "font", &name, &items, forced) {
-        act(app, "home.fontName", json!({"name": value}));
+        match value.as_str() {
+            "__loadFonts" => {
+                if let Some(load) = &app.services.load_system_fonts {
+                    load();
+                }
+            }
+            "__addFonts" => {
+                if let Some(add) = &app.services.add_fonts {
+                    add();
+                }
+            }
+            _ => act(app, "home.fontName", json!({"name": value})),
+        }
     }
 }
 
