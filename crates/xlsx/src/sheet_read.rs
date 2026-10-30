@@ -460,6 +460,7 @@ fn read_row(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, row: &El) {
         next_col = pos.col + 1;
         read_cell(cx, sheet, st, c, pos);
     }
+    sheet.cells.shrink_row(r);
 }
 
 fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos: CellRef) {

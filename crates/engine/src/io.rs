@@ -90,9 +90,13 @@ pub fn open_bytes_with(name: &str, bytes: &[u8], password: Option<&str>, csv_as_
 fn fit_imported_rows(wb: &mut Workbook) {
     for si in 0..wb.sheets.len() {
         let Some(sh) = wb.sheet(si) else { continue };
-        let mut rows: Vec<u32> = sh.cells.iter().map(|(c, _)| c.row).collect();
-        rows.sort_unstable();
-        rows.dedup();
+        // Cells come row by row, so each row appears once as the run of its cells ends (no list of one entry per cell).
+        let mut rows: Vec<u32> = Vec::new();
+        for (c, _) in sh.cells.iter() {
+            if rows.last() != Some(&c.row) {
+                rows.push(c.row);
+            }
+        }
         for row in rows {
             let before = wb.sheet(si).and_then(|sh| sh.rows.get(&row)).and_then(|i| i.size);
             crate::cmd::auto_row_height(wb, si, row);
