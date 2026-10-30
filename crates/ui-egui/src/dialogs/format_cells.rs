@@ -108,7 +108,7 @@ pub(super) fn format_cells(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog
         }
         "Font" => {
             craft_ui::ComboBox::from_label(lang.tr("Font")).selected_text(st.font.name.clone()).show_ui(ui, |ui| {
-                let web = app.services.load_system_fonts.is_some() || app.services.add_fonts.is_some();
+                let web = app.services.load_system_fonts.is_some() || app.services.load_used_fonts.is_some() || app.services.add_fonts.is_some();
                 let mut families = if web { crate::fonts::web_font_list(&app.fonts_bound) } else { crate::fonts::families() };
                 if !families.iter().any(|f| f.eq_ignore_ascii_case(&st.font.name)) {
                     families.push(st.font.name.clone());

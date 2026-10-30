@@ -583,12 +583,15 @@ fn font_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let forced = invoke(app, "home.fontName");
     // The browser lists no fonts of its own: there the list holds the fonts the user has added and the
     // ones the open files use, then entries to read the installed ones or pick font files.
-    let web = app.services.load_system_fonts.is_some() || app.services.add_fonts.is_some();
+    let web = app.services.load_system_fonts.is_some() || app.services.load_used_fonts.is_some() || app.services.add_fonts.is_some();
     let names: Vec<String> = if web { crate::fonts::web_font_list(&app.fonts_bound) } else { FONTS.iter().map(ToString::to_string).collect() };
     let mut items: Vec<(&str, String)> = names.iter().map(|f| (f.as_str(), f.clone())).collect();
     let lang = crate::i18n::current(ui.ctx());
     if app.services.load_system_fonts.is_some() {
         items.push(("__loadFonts", lang.tr("Load System Fonts…").to_string()));
+    }
+    if app.services.load_used_fonts.is_some() {
+        items.push(("__loadUsedFonts", lang.tr("Load Fonts Used in This File").to_string()));
     }
     if app.services.add_fonts.is_some() {
         items.push(("__addFonts", lang.tr("Add Font Files…").to_string()));
@@ -598,6 +601,12 @@ fn font_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
             "__loadFonts" => {
                 if let Some(load) = &app.services.load_system_fonts {
                     load();
+                }
+            }
+            "__loadUsedFonts" => {
+                let wanted = crate::fonts::missing_web_fonts(&app.used_fonts());
+                if let Some(load) = &app.services.load_used_fonts {
+                    load(wanted);
                 }
             }
             "__addFonts" => {

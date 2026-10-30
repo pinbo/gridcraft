@@ -25,18 +25,34 @@ fn say(notes: &Notes, ctx: &egui::Context, text: impl Into<String>) {
     ctx.request_repaint();
 }
 
-fn finish(files: Vec<(String, Vec<u8>)>, notes: &Notes, ctx: &egui::Context) {
+fn finish(files: Vec<(String, Vec<u8>)>, missing: &[String], notes: &Notes, ctx: &egui::Context) {
     let added = add_web_fonts(files);
-    if added > 0 {
-        say(notes, ctx, format!("Added {added} font faces."));
-    } else {
-        say(notes, ctx, "No new fonts: they are already available, or the files are not fonts.");
+    let mut text =
+        if added > 0 { format!("Added {added} font faces.") } else { "No new fonts: they are already available, or the files are not fonts.".into() };
+    if !missing.is_empty() {
+        text.push_str(&format!(" Not installed: {}.", missing.join(", ")));
     }
+    say(notes, ctx, text);
 }
 
-/// Asks the browser for the fonts installed on the computer and adds them.
-pub fn load_system_fonts(ctx: egui::Context, notes: Notes) {
+/// The strings a `FontData` is known by: family, full name and PostScript name.
+fn face_names(face: &JsValue) -> Vec<String> {
+    ["family", "fullName", "postscriptName"]
+        .iter()
+        .filter_map(|key| js_sys::Reflect::get(face, &JsValue::from_str(key)).ok().and_then(|v| v.as_string()))
+        .collect()
+}
+
+/// Asks the browser for the fonts installed on the computer and adds them, all of them or only the
+/// ones named in `only` (the fonts an open file uses).
+pub fn load_system_fonts(ctx: egui::Context, notes: Notes, only: Option<Vec<String>>) {
     wasm_bindgen_futures::spawn_local(async move {
+        if only.as_ref().is_some_and(Vec::is_empty) {
+            return say(&notes, &ctx, "All the fonts used in this file are already available.");
+        }
+        // (lower-case, as written): faces are matched ignoring case, and the report keeps the file's spelling.
+        let wanted: Option<Vec<(String, String)>> = only.map(|names| names.into_iter().map(|n| (n.to_lowercase(), n)).collect());
+        let mut found: std::collections::HashSet<String> = std::collections::HashSet::new();
         let Some(window) = web_sys::window() else { return };
         let query = match js_sys::Reflect::get(&window, &JsValue::from_str("queryLocalFonts")) {
             Ok(f) if f.is_function() => js_sys::Function::from(f),
@@ -64,12 +80,19 @@ pub fn load_system_fonts(ctx: egui::Context, notes: Notes) {
                 break;
             }
             let face = list.get(i);
+            if let Some(wanted) = &wanted {
+                let names: Vec<String> = face_names(&face).iter().map(|n| n.to_lowercase()).collect();
+                let Some((hit, _)) = wanted.iter().find(|(w, _)| names.contains(w)) else { continue };
+                found.insert(hit.clone());
+            }
             let Some(bytes) = face_bytes(&face, MAX_FONT_BYTES.saturating_sub(total)).await else { continue };
             total = total.saturating_add(bytes.len());
             let name = js_sys::Reflect::get(&face, &JsValue::from_str("postscriptName")).ok().and_then(|v| v.as_string());
             files.push((format!("{}.ttf", name.unwrap_or_else(|| format!("local-font-{i}"))), bytes));
         }
-        finish(files, &notes, &ctx);
+        let missing: Vec<String> =
+            wanted.map(|w| w.into_iter().filter(|(low, _)| !found.contains(low)).map(|(_, orig)| orig).collect()).unwrap_or_default();
+        finish(files, &missing, &notes, &ctx);
     });
 }
 
@@ -101,6 +124,6 @@ pub fn add_font_files(ctx: egui::Context, notes: Notes) {
             total += bytes.len();
             files.push((file.file_name(), bytes));
         }
-        finish(files, &notes, &ctx);
+        finish(files, &[], &notes, &ctx);
     });
 }

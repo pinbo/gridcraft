@@ -59,7 +59,11 @@ pub fn start() {
                     let mut services = services(inbox.clone(), cc.egui_ctx.clone());
                     services.load_system_fonts = Some(Box::new({
                         let (ctx, notes) = (cc.egui_ctx.clone(), font_notes.clone());
-                        move || crate::local_fonts::load_system_fonts(ctx.clone(), notes.clone())
+                        move || crate::local_fonts::load_system_fonts(ctx.clone(), notes.clone(), None)
+                    }));
+                    services.load_used_fonts = Some(Box::new({
+                        let (ctx, notes) = (cc.egui_ctx.clone(), font_notes.clone());
+                        move |names| crate::local_fonts::load_system_fonts(ctx.clone(), notes.clone(), Some(names))
                     }));
                     services.add_fonts = Some(Box::new({
                         let (ctx, notes) = (cc.egui_ctx.clone(), font_notes.clone());

@@ -41,6 +41,9 @@ pub struct Services {
     /// Web: let the page read the fonts installed on the computer (the browser asks permission) and
     /// add them with [`crate::fonts::add_web_fonts`]. `None` hides the font list's entry.
     pub load_system_fonts: Option<Box<dyn Fn()>>,
+    /// Web: like `load_system_fonts`, but only the installed fonts with one of these names (the fonts
+    /// the open files use that are not available yet).
+    pub load_used_fonts: Option<Box<dyn Fn(Vec<String>)>>,
     /// Web: pick font files to add with [`crate::fonts::add_web_fonts`].
     pub add_fonts: Option<Box<dyn Fn()>>,
     /// Web: hand PDF bytes to the browser's print flow directly (no download,

@@ -365,6 +365,16 @@ pub fn web_font_list(used: &[String]) -> Vec<String> {
     names
 }
 
+/// The names in `used` that no font is available for yet: not added from the computer
+/// ([`add_web_fonts`]) and not the embedded family. Deduped ignoring case, sorted, no blanks.
+pub fn missing_web_fonts(used: &[String]) -> Vec<String> {
+    let have = |name: &str| name.eq_ignore_ascii_case("Liberation Sans") || web_faces().iter().any(|f| f.answers_to(name));
+    let mut out: Vec<String> = used.iter().filter(|n| !n.trim().is_empty() && !have(n)).cloned().collect();
+    out.sort_by_key(|n| n.to_lowercase());
+    out.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    out
+}
+
 /// The egui family name for one role of one family: `fnt:{family}:{b|n}{i|n}`.
 pub fn role_key(family: &str, bold: bool, italic: bool) -> String {
     format!("fnt:{family}:{}{}", if bold { 'b' } else { 'n' }, if italic { 'i' } else { 'n' })
@@ -575,6 +585,15 @@ mod tests {
         let mut sorted = list.clone();
         sorted.sort_by_key(|n| n.to_lowercase());
         assert_eq!(list, sorted);
+    }
+
+    #[test]
+    /// Only the names no font answers to are missing, once each.
+    fn missing_web_fonts_leaves_out_what_is_available() {
+        let ubuntu = epaint_default_fonts::UBUNTU_LIGHT.to_vec();
+        add_web_fonts([("Ubuntu-Light.ttf".to_string(), ubuntu)]);
+        let used = ["ubuntu", "Wingdings", "wingdings", "Liberation Sans", " ", "Arial"].map(String::from);
+        assert_eq!(missing_web_fonts(&used), ["Arial", "Wingdings"]);
     }
 
     #[test]
