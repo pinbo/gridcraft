@@ -115,15 +115,29 @@ fn read_sheet_format(e: &El, sheet: &mut Sheet) {
     }
 }
 
+/// Reads the rows of a worksheet part into `sheet`. The outer error is a part that cannot be read
+/// at all (missing, or over the size limits); the inner one is XML damaged partway, which keeps the
+/// rows read so far. A plainly stored or deflated sheet is parsed as it inflates, so its XML (a
+/// hundred megabytes for a few million cells) is never held whole; anything else is read first.
+fn parse_rows(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet, st: &mut RowState) -> Result<Result<El, IoError>, IoError> {
+    let mut on_row = |cx: &mut Ctx<'_>, row: El| {
+        read_row(cx, sheet, st, &row);
+        Ok(())
+    };
+    let Some(mut stream) = cx.pkg.stream(part, crate::package::MAX_PART)? else {
+        let bytes = cx.pkg.read(part)?.ok_or_else(|| IoError::Format(format!("missing part {part}")))?;
+        return Ok(xml::parse_streaming(&bytes, &["row"], &mut |row| on_row(cx, row)));
+    };
+    let res = xml::parse_streaming_reader(stream.reader(), &["row"], &mut |row| on_row(cx, row));
+    cx.pkg.charge(part, crate::package::MAX_PART, &stream)?;
+    Ok(res)
+}
+
 pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoError> {
-    let bytes = cx.pkg.read(part)?.ok_or_else(|| IoError::Format(format!("missing part {part}")))?;
     let rels = cx.pkg.rels(part)?;
     let mut sheet = Sheet::new(name);
     let mut st = RowState::default();
-    let res = xml::parse_streaming(&bytes, &["row"], &mut |row| {
-        read_row(cx, &mut sheet, &mut st, &row);
-        Ok(())
-    });
+    let res = parse_rows(cx, part, &mut sheet, &mut st)?;
     let root = match res {
         Ok(r) => r,
         Err(e) => {
@@ -134,7 +148,6 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
     if st.dropped > 0 {
         cx.warn(format!("sheet \"{name}\": {} cells or rows outside the 1,048,576 × 16,384 grid were dropped", st.dropped));
     }
-    drop(bytes);
 
     let mut fit_to_page = false;
     let mut column_assignments_left = MAX_COLUMN_ASSIGNMENTS;

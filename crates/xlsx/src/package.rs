@@ -15,10 +15,44 @@ pub const MAX_TOTAL: u64 = 1024 * 1024 * 1024;
 pub const MAX_ENTRIES: usize = 200_000;
 
 pub struct Package<'a> {
+    bytes: &'a [u8],
     zip: zip::ZipArchive<Cursor<&'a [u8]>>,
     /// Lower-case normalized part name → zip index.
     names: HashMap<String, usize>,
     total: u64,
+}
+
+/// An inflating part, read through [`std::io::BufRead`].
+pub struct PartStream<'a> {
+    reader: std::io::BufReader<CountingTake<'a>>,
+    limit: u64,
+    /// The limit comes from what is left of the package budget, not from the part's own maximum.
+    budget_bound: bool,
+}
+
+impl<'a> PartStream<'a> {
+    /// The buffered reader to parse from.
+    pub fn reader(&mut self) -> &mut std::io::BufReader<CountingTake<'a>> {
+        &mut self.reader
+    }
+}
+
+/// A reader that stops one byte past its limit and counts what it gave out.
+pub struct CountingTake<'a> {
+    inner: Box<dyn Read + 'a>,
+    read: u64,
+    left: u64,
+}
+
+impl Read for CountingTake<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let want = buf.len().min(usize::try_from(self.left).unwrap_or(usize::MAX));
+        let Some(buf) = buf.get_mut(..want).filter(|b| !b.is_empty()) else { return Ok(0) };
+        let n = self.inner.read(buf)?;
+        self.read += n as u64;
+        self.left -= n as u64;
+        Ok(n)
+    }
 }
 
 /// A relationship.
@@ -49,7 +83,7 @@ impl<'a> Package<'a> {
                 names.entry(normalize(n)).or_insert(i);
             }
         }
-        Ok(Package { zip, names, total: 0 })
+        Ok(Package { bytes, zip, names, total: 0 })
     }
 
     pub fn has(&self, part: &str) -> bool {
@@ -94,6 +128,55 @@ impl<'a> Package<'a> {
         read?;
         self.total += out.len() as u64;
         Ok(Some(out))
+    }
+
+    /// Opens a part to be parsed while it inflates, instead of holding all of it in memory (a
+    /// worksheet of millions of cells is a hundred megabytes of XML). The stream borrows the
+    /// package bytes, not the package, so the parser may use it meanwhile. `Ok(None)` when the
+    /// part is missing or is not stored plainly or deflated, which [`Package::read`] still handles.
+    /// Call [`Package::charge`] with the finished stream: until then the budget is not spent.
+    pub fn stream(&mut self, part: &str, maximum: u64) -> Result<Option<PartStream<'a>>, IoError> {
+        let maximum = maximum.min(MAX_PART);
+        let Some(&idx) = self.names.get(&normalize(part)) else { return Ok(None) };
+        let f = self.zip.by_index_raw(idx).map_err(|e| IoError::Zip(format!("{part}: {e}")))?;
+        if f.encrypted() {
+            return Ok(None);
+        }
+        if f.size() > maximum {
+            return Err(IoError::TooLarge(format!("{part} expands to {} bytes", f.size())));
+        }
+        let start = f.data_start() as usize;
+        let Some(end) = start.checked_add(f.compressed_size() as usize) else { return Ok(None) };
+        let Some(raw) = self.bytes.get(start..end) else { return Ok(None) };
+        let source: Box<dyn Read + 'a> = match f.compression() {
+            zip::CompressionMethod::Stored => Box::new(raw),
+            zip::CompressionMethod::Deflated => Box::new(flate2::read::DeflateDecoder::new(raw)),
+            _ => return Ok(None),
+        };
+        let remaining = MAX_TOTAL.saturating_sub(self.total);
+        let limit = maximum.min(remaining);
+        Ok(Some(PartStream {
+            reader: std::io::BufReader::with_capacity(64 * 1024, CountingTake { inner: source, read: 0, left: limit + 1 }),
+            limit,
+            budget_bound: remaining < maximum,
+        }))
+    }
+
+    /// Spends the package budget on a part streamed with [`Package::stream`], whether or not its
+    /// parse succeeded, and refuses a part that expanded past its limit.
+    pub fn charge(&mut self, part: &str, maximum: u64, stream: &PartStream<'_>) -> Result<(), IoError> {
+        let read = stream.reader.get_ref().read;
+        if read > stream.limit {
+            // Making the exhaustion terminal is what `read_limited` does too.
+            self.total = MAX_TOTAL;
+            return Err(IoError::TooLarge(if stream.budget_bound {
+                "package expands to more than 1 GB".into()
+            } else {
+                format!("{part} expands to more than {} bytes", maximum.min(MAX_PART))
+            }));
+        }
+        self.total += read;
+        Ok(())
     }
 
     pub fn read_xml(&mut self, part: &str) -> Result<Option<El>, IoError> {
@@ -226,5 +309,46 @@ mod tests {
         assert_eq!(pkg.total, MAX_TOTAL, "the failed read is charged");
         // Oversized repeated attempts stay cheap errors now: no allowance is left to pay for.
         assert!(matches!(pkg.read("b.xml"), Err(IoError::TooLarge(_))));
+    }
+
+    fn zip_with(name: &str, data: &[u8], method: zip::CompressionMethod) -> Vec<u8> {
+        let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        z.start_file(name, zip::write::SimpleFileOptions::default().compression_method(method)).unwrap();
+        z.write_all(data).unwrap();
+        z.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    /// A streamed part gives the same bytes as a whole read, stored or deflated, and spends the same budget.
+    fn a_streamed_part_matches_a_whole_read_and_charges_the_budget() {
+        let data: Vec<u8> = (0..200_000u32).flat_map(|i| format!("<c>{i}</c>").into_bytes()).collect();
+        for method in [zip::CompressionMethod::Stored, zip::CompressionMethod::Deflated] {
+            let z = zip_with("x.xml", &data, method);
+            let mut pkg = Package::open(&z).unwrap();
+            let mut stream = pkg.stream("x.xml", MAX_PART).unwrap().expect("a stored or deflated part streams");
+            let mut got = Vec::new();
+            stream.reader().read_to_end(&mut got).unwrap();
+            assert_eq!(got, data);
+            pkg.charge("x.xml", MAX_PART, &stream).unwrap();
+            assert_eq!(pkg.total, data.len() as u64);
+            assert!(pkg.stream("missing.xml", MAX_PART).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    /// A part larger than its limit is refused up front, and one that inflates past the limit is refused when charged.
+    fn a_streamed_part_over_its_limit_is_refused() {
+        let data = vec![b'a'; 10_000];
+        let z = zip_with("big.xml", &data, zip::CompressionMethod::Deflated);
+        let mut pkg = Package::open(&z).unwrap();
+        assert!(matches!(pkg.stream("big.xml", 100), Err(IoError::TooLarge(_))));
+        // The remaining budget is what bounds a part whose header claims less than it holds.
+        pkg.total = MAX_TOTAL - 100;
+        let mut stream = pkg.stream("big.xml", MAX_PART).unwrap().unwrap();
+        let mut got = Vec::new();
+        stream.reader().read_to_end(&mut got).unwrap();
+        assert!(got.len() <= 101, "the stream stops one byte past the limit");
+        assert!(matches!(pkg.charge("big.xml", MAX_PART, &stream), Err(IoError::TooLarge(_))));
+        assert_eq!(pkg.total, MAX_TOTAL);
     }
 }

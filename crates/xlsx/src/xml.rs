@@ -223,7 +223,31 @@ pub fn parse(xml: &[u8]) -> Result<El, IoError> {
 /// kept in the returned tree.
 pub fn parse_streaming(xml: &[u8], split: &[&str], cb: &mut dyn FnMut(El) -> Result<(), IoError>) -> Result<El, IoError> {
     let data = to_utf8(xml);
-    let mut reader = Reader::from_reader(data.as_ref());
+    parse_events(Reader::from_reader(data.as_ref()), split, cb)
+}
+
+/// [`parse_streaming`] over a reader, so a big part is parsed as it is inflated. A part that
+/// is not UTF-8 (a UTF-16 byte-order mark or a UTF-16 `<?xml`) is read whole and converted first.
+pub fn parse_streaming_reader<R: std::io::BufRead>(
+    mut reader: R,
+    split: &[&str],
+    cb: &mut dyn FnMut(El) -> Result<(), IoError>,
+) -> Result<El, IoError> {
+    let head = reader.fill_buf().map_err(|e| IoError::Xml(e.to_string()))?;
+    if head.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        reader.consume(3);
+    } else if head.starts_with(&[0xFF, 0xFE])
+        || head.starts_with(&[0xFE, 0xFF])
+        || (head.len() >= 4 && (head[1] == 0 && head[3] == 0 && head[0] != 0 || head[0] == 0 && head[2] == 0 && head[1] != 0))
+    {
+        let mut all = Vec::new();
+        reader.read_to_end(&mut all).map_err(|e| IoError::Xml(e.to_string()))?;
+        return parse_streaming(&all, split, cb);
+    }
+    parse_events(Reader::from_reader(reader), split, cb)
+}
+
+fn parse_events<R: std::io::BufRead>(mut reader: Reader<R>, split: &[&str], cb: &mut dyn FnMut(El) -> Result<(), IoError>) -> Result<El, IoError> {
     {
         let cfg = reader.config_mut();
         cfg.check_end_names = false;
@@ -650,6 +674,28 @@ mod tests {
         assert_eq!(e.child("b").unwrap().text, "t < uA");
         assert!(e.child("c").is_some());
         assert_eq!(e.text, "<raw>");
+    }
+
+    #[test]
+    /// Parsing from a reader matches parsing the bytes, for plain UTF-8, UTF-8 with a BOM and UTF-16.
+    fn parsing_from_a_reader_matches_parsing_the_bytes() {
+        let text = "<r><row n='1'><c>é</c></row><row n='2'/><other/></r>";
+        let utf16: Vec<u8> = [0xFF, 0xFE].into_iter().chain(text.encode_utf16().flat_map(u16::to_le_bytes)).collect();
+        let bom: Vec<u8> = [0xEF, 0xBB, 0xBF].into_iter().chain(text.bytes()).collect();
+        for bytes in [text.as_bytes().to_vec(), bom, utf16] {
+            let (mut a, mut b) = (Vec::new(), Vec::new());
+            let ra = parse_streaming(&bytes, &["row"], &mut |e| {
+                a.push(e);
+                Ok(())
+            })
+            .unwrap();
+            let rb = parse_streaming_reader(std::io::BufReader::with_capacity(4, &bytes[..]), &["row"], &mut |e| {
+                b.push(e);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!((a, ra), (b, rb));
+        }
     }
 
     #[test]

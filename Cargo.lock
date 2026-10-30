@@ -2124,6 +2124,7 @@ name = "gridcraft-xlsx"
 version = "0.13.0"
 dependencies = [
  "aes",
+ "flate2",
  "gridcraft-core",
  "gridcraft-formula",
  "gridcraft-functions",
