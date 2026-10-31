@@ -86,18 +86,13 @@ fn craft_fonts(dir: &std::path::Path, wasm: bool, required: bool) -> Result<Stri
         craft_fonts_policy::check_required(&rows)?;
     }
     let chinese = if wasm { Vec::new() } else { chinese_font_rows(dir, required)? };
-    let latin = if wasm { latin_font_rows(dir) } else { Vec::new() };
-    for row in rows.iter().chain(&chinese).chain(&latin) {
+    for row in rows.iter().chain(&chinese) {
         if craft_fonts_policy::barred(&row.family) {
             println!("cargo::warning=craft-fonts: not embedding {} {} (repository asset policy)", row.family, row.style);
         }
     }
     let mut out = String::new();
-    for row in craft_fonts_policy::embeddable(&rows, wasm)
-        .into_iter()
-        .chain(craft_fonts_policy::embeddable(&chinese, wasm))
-        .chain(craft_fonts_policy::embeddable(&latin, wasm))
-    {
+    for row in craft_fonts_policy::embeddable(&rows, wasm).into_iter().chain(craft_fonts_policy::embeddable(&chinese, wasm)) {
         let path = dir.join(&row.file).canonicalize().map_err(|e| format!("{}: {e}", row.file))?;
         println!("cargo::rerun-if-changed={}", path.display());
         let scripts: Vec<String> = row.scripts.iter().map(|s| format!("{s:?}")).collect();
@@ -110,13 +105,6 @@ fn craft_fonts(dir: &std::path::Path, wasm: bool, required: bool) -> Result<Stri
         );
     }
     Ok(out)
-}
-
-/// The opt-in Latin rows (Liberation Sans and Serif) from craft-fonts' `fonts/latin-manifest.txt`,
-/// web builds only: native builds have system fonts. Always optional: an older checkout without the
-/// manifest just builds without them, and only the `WEB_ALLOWED` rows are embedded.
-fn latin_font_rows(dir: &std::path::Path) -> Vec<craft_fonts_policy::ManifestRow> {
-    read(&dir.join("fonts/latin-manifest.txt"), "building without Liberation fonts", craft_fonts_policy::parse_manifest).unwrap_or_default()
 }
 
 /// The opt-in native Simplified Chinese rows. Older craft-fonts checkouts may lack the manifest, so

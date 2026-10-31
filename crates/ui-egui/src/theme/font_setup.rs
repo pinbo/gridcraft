@@ -227,18 +227,6 @@ pub(super) fn craft_font_faces() -> Vec<(String, &'static CraftFont)> {
         .collect()
 }
 
-/// The craft-fonts Liberation Sans face for a cell or bold interface role, if this build embeds it.
-fn embedded_role_face(role: &str) -> Option<FontData> {
-    let (family, style) = match role {
-        CELL => ("Liberation Sans", "Regular"),
-        CELL_BOLD | UI_BOLD => ("Liberation Sans", "Bold"),
-        CELL_ITALIC => ("Liberation Sans", "Italic"),
-        CELL_BOLD_ITALIC => ("Liberation Sans", "Bold Italic"),
-        _ => return None,
-    };
-    craft_font_faces().into_iter().find(|(_, f)| f.family == family && f.style == style).map(|(_, f)| FontData::from_static(f.bytes))
-}
-
 /// Adds the optional craft-fonts faces to `fonts` and returns their keys.
 fn add_craft_fonts(fonts: &mut FontDefinitions) -> Vec<String> {
     let mut keys = Vec::new();
@@ -558,8 +546,7 @@ fn build_role_chain(
     let paths = candidates(role);
     let refs: Vec<(&str, u32)> = paths.iter().map(|(p, i)| (p.as_str(), *i)).collect();
     let mut chain: Vec<String> = Vec::new();
-    // No system face (always so on the web): the embedded Liberation one, when built with craft-fonts.
-    let loaded = if system { try_load(&refs).or_else(|| embedded_role_face(role)) } else { None };
+    let loaded = if system { try_load(&refs) } else { None };
     if let Some(mut fd) = loaded {
         // Helvetica Neue Bold's own TrueType hints close Cyrillic е into ө at 13 pt on a Retina
         // screen (#1184). Core Text never runs them, so this draws it the way macOS does.

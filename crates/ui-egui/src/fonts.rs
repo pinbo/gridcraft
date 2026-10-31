@@ -352,13 +352,12 @@ pub fn families() -> Vec<String> {
     out
 }
 
-/// The font list of the web build: the one embedded family, the fonts the user has added from their
-/// computer ([`add_web_fonts`]) and the fonts `used` by the open workbooks, A–Z. The browser has no
-/// other fonts, so the standard Excel names are not offered; a workbook that names one of them
-/// still lists it. Adding fonts changes the list on the next frame.
+/// The font list of the web build: the fonts the user has added from their computer
+/// ([`add_web_fonts`]) and the fonts `used` by the open workbooks, A–Z. The browser has no other
+/// fonts, so the standard Excel names are not offered; a workbook that names one of them still
+/// lists it. Adding fonts changes the list on the next frame.
 pub fn web_font_list(used: &[String]) -> Vec<String> {
-    let mut names: Vec<String> = vec!["Liberation Sans".into()];
-    names.extend(web_faces().iter().map(|f| f.family.clone()));
+    let mut names: Vec<String> = web_faces().iter().map(|f| f.family.clone()).collect();
     names.extend(used.iter().filter(|n| !n.trim().is_empty()).cloned());
     names.sort_by_key(|n| n.to_lowercase());
     names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
@@ -366,9 +365,9 @@ pub fn web_font_list(used: &[String]) -> Vec<String> {
 }
 
 /// The names in `used` that no font is available for yet: not added from the computer
-/// ([`add_web_fonts`]) and not the embedded family. Deduped ignoring case, sorted, no blanks.
+/// ([`add_web_fonts`]). Deduped ignoring case, sorted, no blanks.
 pub fn missing_web_fonts(used: &[String]) -> Vec<String> {
-    let have = |name: &str| name.eq_ignore_ascii_case("Liberation Sans") || web_faces().iter().any(|f| f.answers_to(name));
+    let have = |name: &str| web_faces().iter().any(|f| f.answers_to(name));
     let mut out: Vec<String> = used.iter().filter(|n| !n.trim().is_empty() && !have(n)).cloned().collect();
     out.sort_by_key(|n| n.to_lowercase());
     out.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
@@ -574,12 +573,11 @@ mod tests {
     }
 
     #[test]
-    /// The web font list holds the embedded family, added fonts and the open files' fonts: sorted, without repeats or blanks.
+    /// The web font list holds the added fonts and the open files' fonts: sorted, without repeats or blanks.
     fn the_web_font_list_is_added_fonts_and_the_fonts_in_use() {
-        let used = ["calibri".to_string(), "Zeta".to_string(), "Liberation sans".to_string(), " ".to_string(), "Calibri".to_string()];
+        let used = ["calibri".to_string(), "Zeta".to_string(), " ".to_string(), "Calibri".to_string()];
         let list = web_font_list(&used);
         assert_eq!(list.iter().filter(|n| n.eq_ignore_ascii_case("calibri")).count(), 1);
-        assert_eq!(list.iter().filter(|n| n.eq_ignore_ascii_case("liberation sans")).count(), 1);
         assert!(list.contains(&"Zeta".to_string()) && !list.iter().any(|n| n.trim().is_empty()));
         assert!(!list.contains(&"Aptos".to_string()), "the standard names are not offered unless a file uses them");
         let mut sorted = list.clone();
@@ -592,7 +590,7 @@ mod tests {
     fn missing_web_fonts_leaves_out_what_is_available() {
         let ubuntu = epaint_default_fonts::UBUNTU_LIGHT.to_vec();
         add_web_fonts([("Ubuntu-Light.ttf".to_string(), ubuntu)]);
-        let used = ["ubuntu", "Wingdings", "wingdings", "Liberation Sans", " ", "Arial"].map(String::from);
+        let used = ["ubuntu", "Wingdings", "wingdings", " ", "Arial"].map(String::from);
         assert_eq!(missing_web_fonts(&used), ["Arial", "Wingdings"]);
     }
 

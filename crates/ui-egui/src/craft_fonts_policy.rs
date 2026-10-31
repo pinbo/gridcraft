@@ -32,19 +32,12 @@ pub const REQUIRED_FACES: &[(&str, &str, &[&str])] = &[
 /// the manifest, so only `CRAFT_FONTS_REQUIRED=1` builds demand it.
 pub const CHINESE_FACES: &[(&str, &str, &[&str])] = &[("LXGW WenKai Lite", "Regular", &["Hani", "Hans"])];
 
-/// The explicit web allowlist. Browser builds embed only these faces: Liberation Sans, for real
-/// bold and italic cell text. Every other face (the Noto CJK collection, Japanese, Korean, symbol and
-/// serif/monospace faces, the document-only faces) stays off the wasm bundle, so the glyphs only
-/// those cover (`⌃`, `✕`, `◀`, `✓`) may draw as boxes on the web; `📋` still comes from egui's emoji.
-/// More fonts come from the user's computer (`fonts::add_web_fonts`).
-pub const WEB_ALLOWED: &[(&str, &str)] = &[
-    // Real bold and italic cell text: the web has no system fonts, and egui's bundled ones have none.
-    // These come from craft-fonts' opt-in `fonts/latin-manifest.txt`.
-    ("Liberation Sans", "Regular"),
-    ("Liberation Sans", "Bold"),
-    ("Liberation Sans", "Italic"),
-    ("Liberation Sans", "Bold Italic"),
-];
+/// The explicit web allowlist: empty. Browser builds embed no font at all (not even a Latin face
+/// with real bold and italic), which keeps the wasm small; the person loads fonts from their own
+/// computer instead (`fonts::add_web_fonts`). Without them text draws in egui's bundled faces, so
+/// bold and italic are not drawn, and the glyphs only an embedded face covers (`⌃`, `✕`, `◀`, `✓`,
+/// CJK) may draw as boxes; `📋` still comes from egui's emoji.
+pub const WEB_ALLOWED: &[(&str, &str)] = &[];
 
 /// One validated `fonts/manifest.txt` row. Only the fields GridCraft consumes are kept.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -165,18 +158,10 @@ mod tests {
     const GOOD: &str = "NanumGothic | Regular | fonts/nanum-gothic/NanumGothic-Regular.ttf | Hang,Kore | OFL-1.1 | fonts/nanum-gothic/OFL.txt | 76f45ef4a6bcff344c837c95a7dcc26e017e38b5846d5ae0cdcb5b86be2e2d31 | https://example.invalid/nanum";
 
     #[test]
-    /// Asserts the exact web allowlist and that every entry is unbarred, required and not a CJK collection face.
-    fn the_web_allowlist_is_exact_and_never_barred() {
-        assert_eq!(
-            WEB_ALLOWED,
-            &[("Liberation Sans", "Regular"), ("Liberation Sans", "Bold"), ("Liberation Sans", "Italic"), ("Liberation Sans", "Bold Italic"),]
-        );
-        for (family, _) in WEB_ALLOWED {
-            assert!(!barred(family), "{family} must not be barred");
-            // Liberation Sans (from latin-manifest.txt) is optional: a build without them falls back to egui's faces, with no bold or italic.
-            assert!(*family == "Liberation Sans" || REQUIRED_FACES.iter().any(|(f, _, _)| f == family), "{family} must be a required face");
-        }
-        assert!(!WEB_ALLOWED.iter().any(|(family, _)| family.contains("CJK")), "the web allowlist must contain no CJK collection face");
+    /// The web build embeds no font: the allowlist is empty, so no manifest row passes it.
+    fn the_web_build_embeds_no_font() {
+        assert!(WEB_ALLOWED.is_empty());
+        assert!(!web_allowed("NanumGothic", "Regular") && !web_allowed("Liberation Sans", "Regular"));
     }
 
     #[test]
