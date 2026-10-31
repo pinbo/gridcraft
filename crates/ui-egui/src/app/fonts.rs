@@ -41,13 +41,33 @@ impl SheetApp {
     }
 
     /// After a workbook opened (web): hands the host the fonts it uses that are not available yet, so
-    /// it can load them from the computer. Each font name is offered once per visit.
+    /// it can load them from the computer, or offer to. Each font name is offered once per visit.
     pub(super) fn offer_used_fonts(&mut self) {
+        let Some(uid) = self.session.active().map(|d| d.uid) else { return };
+        self.fonts_checked.insert(uid);
         let Some(offer) = &self.services.autoload_fonts else { return };
         let mut missing = fonts::missing_web_fonts(&self.used_fonts());
         missing.retain(|name| self.fonts_offered.insert(name.to_lowercase()));
         if !missing.is_empty() {
-            offer(missing);
+            offer(missing, false);
+        }
+    }
+
+    /// Workbooks nothing has checked yet (the one the page starts with, File › New, samples): their
+    /// fonts are loaded quietly when the browser already allows it. No bar and no message, so a
+    /// blank workbook's default font never asks for anything; each name is tried quietly once.
+    pub(super) fn check_new_workbook_fonts(&mut self) {
+        if self.services.autoload_fonts.is_none() {
+            return;
+        }
+        let fresh: Vec<u64> = self.session.documents().iter().map(|d| d.uid).filter(|uid| self.fonts_checked.insert(*uid)).collect();
+        if fresh.is_empty() {
+            return;
+        }
+        let mut missing = fonts::missing_web_fonts(&self.used_fonts());
+        missing.retain(|name| self.fonts_quiet_tried.insert(name.to_lowercase()));
+        if let (false, Some(offer)) = (missing.is_empty(), &self.services.autoload_fonts) {
+            offer(missing, true);
         }
     }
 
@@ -87,6 +107,7 @@ impl SheetApp {
             self.fonts_rebind = false;
         } else if !defer_font_change && !self.prepared_fonts && fonts::scan_done() {
             self.note_web_fonts();
+            self.check_new_workbook_fonts();
             self.rebind_workbook_fonts(ctx);
         }
     }

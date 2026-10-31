@@ -42,11 +42,12 @@ pub struct Services {
     /// eframe's web runner does not implement `ViewportCommand::Title` and warns about it, so with
     /// this set the title goes here instead of to the viewport.
     pub set_title: Option<SetTitle>,
-    /// Web: a workbook was just opened that uses these fonts, none of them available yet (see
+    /// Web: a workbook uses these fonts, none of them available yet (see
     /// [`crate::fonts::missing_web_fonts`]). The host loads them when the browser allows reading
-    /// the installed fonts without asking, and otherwise offers to (an info bar whose button runs
-    /// `load_used_fonts`: the browser asks only after a click).
-    pub autoload_fonts: Option<Box<dyn Fn(Vec<String>)>>,
+    /// the installed fonts without asking. Otherwise, for a file just opened (`quiet` false) it
+    /// offers to (an info bar whose button runs `load_used_fonts`: the browser asks only after a
+    /// click); for a new blank workbook (`quiet` true) it does nothing, and reports nothing.
+    pub autoload_fonts: Option<AutoloadFonts>,
     /// Web: let the page list the fonts installed on the computer (the browser asks permission); the
     /// host then opens the Load System Fonts picker (`fontPicker` dialog with the family names).
     /// `None` hides the font list's entry.
@@ -65,6 +66,9 @@ pub struct Services {
 }
 
 /// Shared queue of files read asynchronously (browser file picker, drag and drop).
+/// Loads or offers fonts a workbook uses (see [`Services::autoload_fonts`]): the names, and whether to stay quiet.
+pub type AutoloadFonts = Box<dyn Fn(Vec<String>, bool)>;
+
 /// Shows a window title (see [`Services::set_title`]).
 pub type SetTitle = Box<dyn Fn(&str)>;
 

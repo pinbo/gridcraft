@@ -60,6 +60,8 @@ impl SheetApp {
             fonts_web_generation: 0,
             fonts_force_rebind: false,
             fonts_offered: Default::default(),
+            fonts_quiet_tried: Default::default(),
+            fonts_checked: Default::default(),
             fonts_rebind: false,
             fonts_han: None,
             effective_dark: false,
@@ -491,7 +493,10 @@ mod lifecycle_tests {
         let offered: std::rc::Rc<std::cell::RefCell<Vec<Vec<String>>>> = Default::default();
         let loaded: std::rc::Rc<std::cell::RefCell<Vec<Vec<String>>>> = Default::default();
         let (o, l) = (offered.clone(), loaded.clone());
-        app.services.autoload_fonts = Some(Box::new(move |names| o.borrow_mut().push(names)));
+        app.services.autoload_fonts = Some(Box::new(move |names, quiet| {
+            assert!(!quiet, "a file that was opened is not offered quietly");
+            o.borrow_mut().push(names)
+        }));
         app.services.load_used_fonts = Some(Box::new(move |names| l.borrow_mut().push(names)));
         app.run("home.fontName", serde_json::json!({"range": "A1", "name": "Zzz Test Font"})).unwrap();
         app.offer_used_fonts();
@@ -503,6 +508,24 @@ mod lifecycle_tests {
         app.load_used_fonts_now();
         assert!(loaded.borrow().first().is_some_and(|names| names.iter().any(|n| n == "Zzz Test Font")));
         assert!(app.notice.is_none());
+    }
+
+    #[test]
+    /// A workbook nothing opened (the starting one, File › New) is checked quietly once, and a font tried quietly is not tried again.
+    fn a_new_blank_workbook_asks_the_host_quietly_once() {
+        let mut app = app();
+        type Calls = std::rc::Rc<std::cell::RefCell<Vec<(Vec<String>, bool)>>>;
+        let calls: Calls = Default::default();
+        let sink = calls.clone();
+        app.services.autoload_fonts = Some(Box::new(move |names, quiet| sink.borrow_mut().push((names, quiet))));
+        app.check_new_workbook_fonts();
+        assert_eq!(calls.borrow().len(), 1);
+        assert!(calls.borrow().first().is_some_and(|(names, quiet)| *quiet && !names.is_empty()));
+        app.check_new_workbook_fonts();
+        assert_eq!(calls.borrow().len(), 1, "the same workbook is not checked twice");
+        app.run("file.new", serde_json::json!({})).unwrap();
+        app.check_new_workbook_fonts();
+        assert_eq!(calls.borrow().len(), 1, "fonts already tried quietly are not tried again");
     }
 
     #[test]

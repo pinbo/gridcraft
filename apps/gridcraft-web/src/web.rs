@@ -75,11 +75,11 @@ pub fn start() {
                     }));
                     services.autoload_fonts = Some(Box::new({
                         let (ctx, notes, offer) = (cc.egui_ctx.clone(), font_notes.clone(), font_offer.clone());
-                        move |names| crate::local_fonts::autoload_used_fonts(ctx.clone(), notes.clone(), names, offer.clone())
+                        move |names, quiet| crate::local_fonts::autoload_used_fonts(ctx.clone(), notes.clone(), names, offer.clone(), quiet)
                     }));
                     services.load_used_fonts = Some(Box::new({
                         let (ctx, notes) = (cc.egui_ctx.clone(), font_notes.clone());
-                        move |names| crate::local_fonts::load_used_fonts(ctx.clone(), notes.clone(), names)
+                        move |names| crate::local_fonts::load_used_fonts(ctx.clone(), notes.clone(), names, false)
                     }));
                     services.add_fonts = Some(Box::new({
                         let (ctx, notes) = (cc.egui_ctx.clone(), font_notes.clone());

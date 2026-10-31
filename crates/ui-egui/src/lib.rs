@@ -240,6 +240,10 @@ pub struct SheetApp {
     /// Font names (lower case) already offered for loading after a file opened, so each is tried
     /// once per visit.
     fonts_offered: std::collections::HashSet<String>,
+    /// Font names (lower case) tried quietly for a new blank workbook, and the workbooks (uids)
+    /// whose fonts were already checked.
+    fonts_quiet_tried: std::collections::HashSet<String>,
+    fonts_checked: std::collections::HashSet<u64>,
     /// Set while a font-set change is pending activation: skip this frame's paint, like the
     /// startup `fonts_ready` gate (egui applies new definitions at the next pass).
     fonts_rebind: bool,

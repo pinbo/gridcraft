@@ -35,8 +35,13 @@ fn say(notes: &Notes, ctx: &egui::Context, text: impl Into<String>) {
     ctx.request_repaint();
 }
 
-fn finish(files: Vec<(String, Vec<u8>)>, missing: &[String], notes: &Notes, ctx: &egui::Context) {
+fn finish(files: Vec<(String, Vec<u8>)>, missing: &[String], notes: &Notes, ctx: &egui::Context, quiet: bool) {
     let added = add_web_fonts(files);
+    if quiet {
+        // Nothing was asked for: the fonts just show up (the catalog's change repaints), a miss is not worth a message.
+        ctx.request_repaint();
+        return;
+    }
     let mut text =
         if added > 0 { format!("Added {added} font faces.") } else { "No new fonts: they are already available, or the files are not fonts.".into() };
     if !missing.is_empty() {
@@ -99,17 +104,18 @@ pub fn load_chosen_fonts(ctx: egui::Context, notes: Notes, listed: Listed, famil
     let Some(list) = listed.borrow().clone() else {
         return say(&notes, &ctx, "The font list is no longer available: choose Load System Fonts again.");
     };
-    wasm_bindgen_futures::spawn_local(async move { read_and_add(list, families, &notes, &ctx).await });
+    wasm_bindgen_futures::spawn_local(async move { read_and_add(list, families, &notes, &ctx, false).await });
 }
 
 /// The family names (`names`) a file just opened uses: read them straight away when the browser
 /// already lets the page read the installed fonts, otherwise leave them in `offer` for the shell to
-/// offer with a button (the browser asks for permission only after a click).
-pub fn autoload_used_fonts(ctx: egui::Context, notes: Notes, names: Vec<String>, offer: Offer) {
+/// offer with a button (the browser asks for permission only after a click). `quiet` (a new blank
+/// workbook) never offers and never reports, it only loads what the browser already allows.
+pub fn autoload_used_fonts(ctx: egui::Context, notes: Notes, names: Vec<String>, offer: Offer, quiet: bool) {
     wasm_bindgen_futures::spawn_local(async move {
         match permission().await.as_deref() {
-            Some("granted") => load_used_fonts(ctx, notes, names),
-            Some("prompt") => {
+            Some("granted") => load_used_fonts(ctx, notes, names, quiet),
+            Some("prompt") if !quiet => {
                 *offer.borrow_mut() = Some(names);
                 ctx.request_repaint();
             }
@@ -133,21 +139,25 @@ async fn permission() -> Option<String> {
 }
 
 /// Reads only the installed fonts the open files use (`names`).
-pub fn load_used_fonts(ctx: egui::Context, notes: Notes, names: Vec<String>) {
+pub fn load_used_fonts(ctx: egui::Context, notes: Notes, names: Vec<String>, quiet: bool) {
     wasm_bindgen_futures::spawn_local(async move {
         if names.is_empty() {
-            return say(&notes, &ctx, "All the fonts used in this file are already available.");
+            if !quiet {
+                say(&notes, &ctx, "All the fonts used in this file are already available.");
+            }
+            return;
         }
         match query_fonts().await {
-            Ok(list) => read_and_add(list, names, &notes, &ctx).await,
-            Err(why) => say(&notes, &ctx, why),
+            Ok(list) => read_and_add(list, names, &notes, &ctx, quiet).await,
+            Err(why) if !quiet => say(&notes, &ctx, why),
+            Err(_) => {}
         }
     });
 }
 
 /// Reads the faces of `list` that go by one of `names` (family, full or PostScript name, ignoring
 /// case), within the limits, and adds them; says which of the names matched nothing.
-async fn read_and_add(list: js_sys::Array, names: Vec<String>, notes: &Notes, ctx: &egui::Context) {
+async fn read_and_add(list: js_sys::Array, names: Vec<String>, notes: &Notes, ctx: &egui::Context, quiet: bool) {
     // (lower-case, as written): faces are matched ignoring case, and the report keeps the spelling given.
     let wanted: Vec<(String, String)> = names.into_iter().map(|n| (n.to_lowercase(), n)).collect();
     let mut found: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -167,7 +177,7 @@ async fn read_and_add(list: js_sys::Array, names: Vec<String>, notes: &Notes, ct
         files.push((format!("{}.ttf", string_prop(&face, "postscriptName").unwrap_or_else(|| format!("local-font-{i}"))), bytes));
     }
     let missing: Vec<String> = wanted.into_iter().filter(|(low, _)| !found.contains(low)).map(|(_, orig)| orig).collect();
-    finish(files, &missing, notes, ctx);
+    finish(files, &missing, notes, ctx, quiet);
 }
 
 /// The bytes of one `FontData`, unless the face is too big for `room` or can't be read.
@@ -198,6 +208,6 @@ pub fn add_font_files(ctx: egui::Context, notes: Notes) {
             total += bytes.len();
             files.push((file.file_name(), bytes));
         }
-        finish(files, &[], &notes, &ctx);
+        finish(files, &[], &notes, &ctx, false);
     });
 }
