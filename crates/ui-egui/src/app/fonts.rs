@@ -40,6 +40,26 @@ impl SheetApp {
             .fold((0u64, 0u64), |(uid, rev), d| (uid.wrapping_mul(31).wrapping_add(d.uid), rev.wrapping_mul(31).wrapping_add(d.revision)))
     }
 
+    /// After a workbook opened (web): hands the host the fonts it uses that are not available yet, so
+    /// it can load them from the computer. Each font name is offered once per visit.
+    pub(super) fn offer_used_fonts(&mut self) {
+        let Some(offer) = &self.services.autoload_fonts else { return };
+        let mut missing = fonts::missing_web_fonts(&self.used_fonts());
+        missing.retain(|name| self.fonts_offered.insert(name.to_lowercase()));
+        if !missing.is_empty() {
+            offer(missing);
+        }
+    }
+
+    /// The info bar's Load fonts button: reads the fonts the open workbooks use from the computer.
+    pub(crate) fn load_used_fonts_now(&mut self) {
+        let wanted = fonts::missing_web_fonts(&self.used_fonts());
+        if let Some(load) = &self.services.load_used_fonts {
+            load(wanted);
+        }
+        self.notice = None;
+    }
+
     /// Installs the text-width closure once, on the first frame.
     pub(super) fn ensure_text_width(&mut self, ctx: &egui::Context) {
         if self.session.text_width.is_some() {

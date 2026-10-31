@@ -58,6 +58,7 @@ pub fn start() {
                     let font_notes = crate::local_fonts::Notes::default();
                     let font_picker = crate::local_fonts::Picker::default();
                     let listed_fonts = crate::local_fonts::Listed::default();
+                    let font_offer = crate::local_fonts::Offer::default();
                     let mut services = services(inbox.clone(), cc.egui_ctx.clone());
                     services.set_title = Some(Box::new(|title| {
                         if let Some(document) = web_sys::window().and_then(|w| w.document()) {
@@ -71,6 +72,10 @@ pub fn start() {
                     services.load_chosen_fonts = Some(Box::new({
                         let (ctx, notes, listed) = (cc.egui_ctx.clone(), font_notes.clone(), listed_fonts.clone());
                         move |families| crate::local_fonts::load_chosen_fonts(ctx.clone(), notes.clone(), listed.clone(), families)
+                    }));
+                    services.autoload_fonts = Some(Box::new({
+                        let (ctx, notes, offer) = (cc.egui_ctx.clone(), font_notes.clone(), font_offer.clone());
+                        move |names| crate::local_fonts::autoload_used_fonts(ctx.clone(), notes.clone(), names, offer.clone())
                     }));
                     services.load_used_fonts = Some(Box::new({
                         let (ctx, notes) = (cc.egui_ctx.clone(), font_notes.clone());
@@ -120,7 +125,7 @@ pub fn start() {
                         }
                         bridge.post_ready();
                     }
-                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge, prefs, font_notes, font_picker }))
+                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge, prefs, font_notes, font_picker, font_offer }))
                 }),
             )
             .await;
@@ -153,6 +158,8 @@ struct WebShell {
     font_notes: crate::local_fonts::Notes,
     /// Family names waiting to be offered in the Load System Fonts picker.
     font_picker: crate::local_fonts::Picker,
+    /// Fonts a just-opened file uses, waiting for an info bar that asks to load them.
+    font_offer: crate::local_fonts::Offer,
 }
 
 fn local_storage() -> Option<web_sys::Storage> {
@@ -184,6 +191,17 @@ impl eframe::App for WebShell {
         self.app.logic(ctx);
         if let Some(families) = self.font_picker.borrow_mut().take() {
             self.app.open_dialog("fontPicker", serde_json::json!({"families": families}));
+        }
+        if self.app.notice.is_none()
+            && let Some(names) = self.font_offer.borrow_mut().take()
+        {
+            let shown: Vec<&str> = names.iter().map(String::as_str).take(4).collect();
+            let more = if names.len() > shown.len() { ", …" } else { "" };
+            self.app.notice = Some(gridcraft_ui_egui::Notice {
+                text: format!("This file uses fonts that are not loaded: {}{more}.", shown.join(", ")),
+                kind: gridcraft_ui_egui::NoticeKind::Info,
+                action: Some(("Load fonts".into(), "loadUsedFonts".into())),
+            });
         }
         if let Some(note) = self.font_notes.borrow_mut().pop() {
             self.app.toast = Some((note, gridcraft_ui_egui::now_ms()));

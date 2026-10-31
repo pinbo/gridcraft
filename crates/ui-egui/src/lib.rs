@@ -237,6 +237,9 @@ pub struct SheetApp {
     fonts_web_generation: u64,
     /// Bind the workbook fonts again even though the names in use did not change (fonts were added).
     fonts_force_rebind: bool,
+    /// Font names (lower case) already offered for loading after a file opened, so each is tried
+    /// once per visit.
+    fonts_offered: std::collections::HashSet<String>,
     /// Set while a font-set change is pending activation: skip this frame's paint, like the
     /// startup `fonts_ready` gate (egui applies new definitions at the next pass).
     fonts_rebind: bool,

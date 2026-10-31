@@ -90,6 +90,7 @@ impl SheetApp {
                 Ok(r) => {
                     self.backstage = None;
                     self.show_open_warnings(&r);
+                    self.offer_used_fonts();
                 }
                 Err(e) if e.contains(gridcraft_engine::io::PASSWORD_REQUIRED) => {
                     self.backstage = None;

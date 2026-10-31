@@ -42,6 +42,11 @@ pub struct Services {
     /// eframe's web runner does not implement `ViewportCommand::Title` and warns about it, so with
     /// this set the title goes here instead of to the viewport.
     pub set_title: Option<SetTitle>,
+    /// Web: a workbook was just opened that uses these fonts, none of them available yet (see
+    /// [`crate::fonts::missing_web_fonts`]). The host loads them when the browser allows reading
+    /// the installed fonts without asking, and otherwise offers to (an info bar whose button runs
+    /// `load_used_fonts`: the browser asks only after a click).
+    pub autoload_fonts: Option<Box<dyn Fn(Vec<String>)>>,
     /// Web: let the page list the fonts installed on the computer (the browser asks permission); the
     /// host then opens the Load System Fonts picker (`fontPicker` dialog with the family names).
     /// `None` hides the font list's entry.

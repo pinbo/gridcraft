@@ -18,6 +18,8 @@ use wasm_bindgen::JsValue;
 pub type Notes = Rc<RefCell<Vec<String>>>;
 /// The family names the Load System Fonts picker should offer, set when the browser has listed the fonts.
 pub type Picker = Rc<RefCell<Option<Vec<String>>>>;
+/// The fonts an opened file uses that the browser has not been asked for yet, waiting for the person's click.
+pub type Offer = Rc<RefCell<Option<Vec<String>>>>;
 /// The browser's list of installed faces (`FontData` objects), kept between the two steps.
 pub type Listed = Rc<RefCell<Option<js_sys::Array>>>;
 
@@ -98,6 +100,36 @@ pub fn load_chosen_fonts(ctx: egui::Context, notes: Notes, listed: Listed, famil
         return say(&notes, &ctx, "The font list is no longer available: choose Load System Fonts again.");
     };
     wasm_bindgen_futures::spawn_local(async move { read_and_add(list, families, &notes, &ctx).await });
+}
+
+/// The family names (`names`) a file just opened uses: read them straight away when the browser
+/// already lets the page read the installed fonts, otherwise leave them in `offer` for the shell to
+/// offer with a button (the browser asks for permission only after a click).
+pub fn autoload_used_fonts(ctx: egui::Context, notes: Notes, names: Vec<String>, offer: Offer) {
+    wasm_bindgen_futures::spawn_local(async move {
+        match permission().await.as_deref() {
+            Some("granted") => load_used_fonts(ctx, notes, names),
+            Some("prompt") => {
+                *offer.borrow_mut() = Some(names);
+                ctx.request_repaint();
+            }
+            _ => {}
+        }
+    });
+}
+
+/// The state of the `local-fonts` permission (`granted`, `prompt` or `denied`); `None` when the
+/// browser has no Local Font Access API or cannot say.
+async fn permission() -> Option<String> {
+    let window = web_sys::window()?;
+    js_sys::Reflect::get(&window, &JsValue::from_str("queryLocalFonts")).ok().filter(JsValue::is_function)?;
+    let permissions = js_sys::Reflect::get(&window.navigator(), &JsValue::from_str("permissions")).ok().filter(|p| p.is_object())?;
+    let query = js_sys::Reflect::get(&permissions, &JsValue::from_str("query")).ok().filter(JsValue::is_function)?;
+    let descriptor = js_sys::Object::new();
+    js_sys::Reflect::set(&descriptor, &JsValue::from_str("name"), &JsValue::from_str("local-fonts")).ok()?;
+    let promise = js_sys::Function::from(query).call1(&permissions, &descriptor).ok()?;
+    let status = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise)).await.ok()?;
+    string_prop(&status, "state")
 }
 
 /// Reads only the installed fonts the open files use (`names`).

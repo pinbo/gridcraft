@@ -59,6 +59,7 @@ impl SheetApp {
             fonts_seen: (0, 0),
             fonts_web_generation: 0,
             fonts_force_rebind: false,
+            fonts_offered: Default::default(),
             fonts_rebind: false,
             fonts_han: None,
             effective_dark: false,
@@ -481,6 +482,27 @@ mod lifecycle_tests {
         assert_eq!(app.grid.last_autosave, saved_at, "the same change is not saved a second time");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    /// A just-opened workbook's fonts that are not available yet go to the host once each; the info bar button loads them.
+    fn fonts_a_new_file_uses_are_offered_to_the_host_once() {
+        let mut app = app();
+        let offered: std::rc::Rc<std::cell::RefCell<Vec<Vec<String>>>> = Default::default();
+        let loaded: std::rc::Rc<std::cell::RefCell<Vec<Vec<String>>>> = Default::default();
+        let (o, l) = (offered.clone(), loaded.clone());
+        app.services.autoload_fonts = Some(Box::new(move |names| o.borrow_mut().push(names)));
+        app.services.load_used_fonts = Some(Box::new(move |names| l.borrow_mut().push(names)));
+        app.run("home.fontName", serde_json::json!({"range": "A1", "name": "Zzz Test Font"})).unwrap();
+        app.offer_used_fonts();
+        assert!(offered.borrow().first().is_some_and(|names| names.iter().any(|n| n == "Zzz Test Font")));
+        let count = offered.borrow().len();
+        app.offer_used_fonts();
+        assert_eq!(offered.borrow().len(), count, "a font already offered is not offered again");
+        app.notice = Some(Notice { text: "x".into(), kind: NoticeKind::Info, action: None });
+        app.load_used_fonts_now();
+        assert!(loaded.borrow().first().is_some_and(|names| names.iter().any(|n| n == "Zzz Test Font")));
+        assert!(app.notice.is_none());
     }
 
     #[test]

@@ -669,7 +669,13 @@ pub fn notice_bar(app: &mut SheetApp, ui: &mut Ui) {
         });
     });
     if let Some((_, dialog)) = action {
-        app.open_dialog(&dialog, serde_json::json!({}));
+        // The info bar of an opened file that uses fonts the browser has not been given: its button
+        // is the click the browser wants before it asks to read the installed fonts.
+        if dialog == "loadUsedFonts" {
+            app.load_used_fonts_now();
+        } else {
+            app.open_dialog(&dialog, serde_json::json!({}));
+        }
     }
     if dismiss {
         app.notice = None;
