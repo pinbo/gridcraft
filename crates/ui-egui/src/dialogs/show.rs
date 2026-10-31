@@ -5,6 +5,7 @@ use super::command_search::command_search;
 use super::cond_format_rules::manage_rules;
 use super::data::{advanced_filter_form, data_validation_form, sort};
 use super::find::{find, go_to};
+use super::font_picker::font_picker;
 use super::format_cells::format_cells;
 use super::insert_function::insert_function;
 use super::names::{name_manager, paste_name};
@@ -136,6 +137,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         "analysisToolPak" => 420.0,
         "solver" => 460.0,
         "zoom" => 220.0,
+        "fontPicker" => 420.0,
         "pasteSpecial" => 480.0,
         _ => 380.0,
     };
@@ -163,6 +165,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                 "find" => find(app, ui, &mut d),
                 "goTo" => go_to(app, ui, &mut d, &mut confirm),
                 "zoom" => zoom(ui, &mut d, &mut confirm, &mut open),
+                "fontPicker" => font_picker(app, ui, &mut d, &mut confirm, &mut open),
                 "sort" => sort(app, ui, &mut d, &mut confirm),
                 "nameManager" => name_manager(app, ui, &mut d, &mut open),
                 "pasteName" => paste_name(app, ui, &mut d, &mut confirm, &mut open),

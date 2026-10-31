@@ -56,14 +56,20 @@ pub fn start() {
                         let _ = session.execute("file.new", serde_json::json!({"sample": "sales"}));
                     }
                     let font_notes = crate::local_fonts::Notes::default();
+                    let font_picker = crate::local_fonts::Picker::default();
+                    let listed_fonts = crate::local_fonts::Listed::default();
                     let mut services = services(inbox.clone(), cc.egui_ctx.clone());
                     services.load_system_fonts = Some(Box::new({
-                        let (ctx, notes) = (cc.egui_ctx.clone(), font_notes.clone());
-                        move || crate::local_fonts::load_system_fonts(ctx.clone(), notes.clone(), None)
+                        let (ctx, notes, picker, listed) = (cc.egui_ctx.clone(), font_notes.clone(), font_picker.clone(), listed_fonts.clone());
+                        move || crate::local_fonts::choose_system_fonts(ctx.clone(), notes.clone(), picker.clone(), listed.clone())
+                    }));
+                    services.load_chosen_fonts = Some(Box::new({
+                        let (ctx, notes, listed) = (cc.egui_ctx.clone(), font_notes.clone(), listed_fonts.clone());
+                        move |families| crate::local_fonts::load_chosen_fonts(ctx.clone(), notes.clone(), listed.clone(), families)
                     }));
                     services.load_used_fonts = Some(Box::new({
                         let (ctx, notes) = (cc.egui_ctx.clone(), font_notes.clone());
-                        move |names| crate::local_fonts::load_system_fonts(ctx.clone(), notes.clone(), Some(names))
+                        move |names| crate::local_fonts::load_used_fonts(ctx.clone(), notes.clone(), names)
                     }));
                     services.add_fonts = Some(Box::new({
                         let (ctx, notes) = (cc.egui_ctx.clone(), font_notes.clone());
@@ -109,7 +115,7 @@ pub fn start() {
                         }
                         bridge.post_ready();
                     }
-                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge, prefs, font_notes }))
+                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge, prefs, font_notes, font_picker }))
                 }),
             )
             .await;
@@ -140,6 +146,8 @@ struct WebShell {
     prefs: crate::prefs::PrefsSync,
     /// What loading fonts from the computer has to tell the user.
     font_notes: crate::local_fonts::Notes,
+    /// Family names waiting to be offered in the Load System Fonts picker.
+    font_picker: crate::local_fonts::Picker,
 }
 
 fn local_storage() -> Option<web_sys::Storage> {
@@ -169,6 +177,9 @@ impl eframe::App for WebShell {
             });
         }
         self.app.logic(ctx);
+        if let Some(families) = self.font_picker.borrow_mut().take() {
+            self.app.open_dialog("fontPicker", serde_json::json!({"families": families}));
+        }
         if let Some(note) = self.font_notes.borrow_mut().pop() {
             self.app.toast = Some((note, gridcraft_ui_egui::now_ms()));
         }

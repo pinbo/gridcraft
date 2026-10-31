@@ -38,9 +38,13 @@ pub struct Services {
     pub open_async: Option<Box<dyn Fn()>>,
     /// Files delivered asynchronously (name, bytes), opened on the next frame.
     pub inbox: Option<Inbox>,
-    /// Web: let the page read the fonts installed on the computer (the browser asks permission) and
-    /// add them with [`crate::fonts::add_web_fonts`]. `None` hides the font list's entry.
+    /// Web: let the page list the fonts installed on the computer (the browser asks permission); the
+    /// host then opens the Load System Fonts picker (`fontPicker` dialog with the family names).
+    /// `None` hides the font list's entry.
     pub load_system_fonts: Option<Box<dyn Fn()>>,
+    /// Web: read the installed fonts of these families (the ones ticked in the picker) and add them
+    /// with [`crate::fonts::add_web_fonts`].
+    pub load_chosen_fonts: Option<Box<dyn Fn(Vec<String>)>>,
     /// Web: like `load_system_fonts`, but only the installed fonts with one of these names (the fonts
     /// the open files use that are not available yet).
     pub load_used_fonts: Option<Box<dyn Fn(Vec<String>)>>,

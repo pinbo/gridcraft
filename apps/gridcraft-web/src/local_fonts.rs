@@ -1,7 +1,11 @@
 //! Fonts from the user's computer: the browser's Local Font Access API (`queryLocalFonts`, which
-//! asks permission) and font files picked in a dialog. Both hand the bytes to
-//! [`gridcraft_ui_egui::fonts::add_web_fonts`], after which the font list offers them and cells
-//! render with them. Each failure is reported to the user through [`Notes`], never panics.
+//! asks permission) and font files picked in a dialog. Everything read is handed to
+//! [`gridcraft_ui_egui::fonts::add_web_fonts`], after which the font list offers it and cells
+//! render with it. Failures are reported to the user through [`Notes`], never panic.
+//!
+//! Load System Fonts is two steps: the browser's list of installed faces is made without reading
+//! any font file, its family names go to the picker (`Picker`), and only the families the person
+//! ticks are read.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -12,13 +16,17 @@ use wasm_bindgen::JsValue;
 
 /// Messages for the user, shown as toasts by the shell.
 pub type Notes = Rc<RefCell<Vec<String>>>;
+/// The family names the Load System Fonts picker should offer, set when the browser has listed the fonts.
+pub type Picker = Rc<RefCell<Option<Vec<String>>>>;
+/// The browser's list of installed faces (`FontData` objects), kept between the two steps.
+pub type Listed = Rc<RefCell<Option<js_sys::Array>>>;
 
 /// Most font files one request reads (a designer's machine has thousands of faces).
 const MAX_FONT_FILES: usize = 500;
 /// Most font bytes one request reads into memory (wasm memory is small).
 const MAX_FONT_BYTES: usize = 192 << 20;
-/// Most local fonts looked at, whether they end up added or not.
-const MAX_TRIED: u32 = 4000;
+/// Most installed faces looked at, whether they end up added or not.
+const MAX_TRIED: u32 = 20_000;
 
 fn say(notes: &Notes, ctx: &egui::Context, text: impl Into<String>) {
     notes.borrow_mut().push(text.into());
@@ -35,65 +43,99 @@ fn finish(files: Vec<(String, Vec<u8>)>, missing: &[String], notes: &Notes, ctx:
     say(notes, ctx, text);
 }
 
-/// The strings a `FontData` is known by: family, full name and PostScript name.
-fn face_names(face: &JsValue) -> Vec<String> {
-    ["family", "fullName", "postscriptName"]
-        .iter()
-        .filter_map(|key| js_sys::Reflect::get(face, &JsValue::from_str(key)).ok().and_then(|v| v.as_string()))
-        .collect()
+fn string_prop(face: &JsValue, key: &str) -> Option<String> {
+    js_sys::Reflect::get(face, &JsValue::from_str(key)).ok().and_then(|v| v.as_string())
 }
 
-/// Asks the browser for the fonts installed on the computer and adds them, all of them or only the
-/// ones named in `only` (the fonts an open file uses).
-pub fn load_system_fonts(ctx: egui::Context, notes: Notes, only: Option<Vec<String>>) {
+/// The strings a `FontData` is known by: family, full name and PostScript name.
+fn face_names(face: &JsValue) -> Vec<String> {
+    ["family", "fullName", "postscriptName"].iter().filter_map(|key| string_prop(face, key)).collect()
+}
+
+/// Asks the browser for the installed faces (it asks the person's permission first).
+async fn query_fonts() -> Result<js_sys::Array, &'static str> {
+    let window = web_sys::window().ok_or("no window")?;
+    let query = match js_sys::Reflect::get(&window, &JsValue::from_str("queryLocalFonts")) {
+        Ok(f) if f.is_function() => js_sys::Function::from(f),
+        _ => return Err("This browser can't read installed fonts. Use Add Font Files… instead."),
+    };
+    let promise = query.call0(&window).map(js_sys::Promise::from).map_err(|e| {
+        log::warn!("queryLocalFonts failed: {e:?}");
+        "Access to the installed fonts was denied."
+    })?;
+    match wasm_bindgen_futures::JsFuture::from(promise).await {
+        Ok(v) => Ok(js_sys::Array::from(&v)),
+        Err(e) => {
+            log::warn!("queryLocalFonts rejected: {e:?}");
+            Err("Access to the installed fonts was denied.")
+        }
+    }
+}
+
+/// Step one of Load System Fonts: lists the installed faces, keeps the list and offers the family
+/// names to the picker.
+pub fn choose_system_fonts(ctx: egui::Context, notes: Notes, picker: Picker, listed: Listed) {
     wasm_bindgen_futures::spawn_local(async move {
-        if only.as_ref().is_some_and(Vec::is_empty) {
+        let list = match query_fonts().await {
+            Ok(list) => list,
+            Err(why) => return say(&notes, &ctx, why),
+        };
+        let mut families: Vec<String> = (0..list.length().min(MAX_TRIED)).filter_map(|i| string_prop(&list.get(i), "family")).collect();
+        families.sort_by_key(|f| f.to_lowercase());
+        families.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        if families.is_empty() {
+            return say(&notes, &ctx, "No installed fonts were listed.");
+        }
+        *listed.borrow_mut() = Some(list);
+        *picker.borrow_mut() = Some(families);
+        ctx.request_repaint();
+    });
+}
+
+/// Step two: reads the installed fonts of the `families` the person ticked.
+pub fn load_chosen_fonts(ctx: egui::Context, notes: Notes, listed: Listed, families: Vec<String>) {
+    let Some(list) = listed.borrow().clone() else {
+        return say(&notes, &ctx, "The font list is no longer available: choose Load System Fonts again.");
+    };
+    wasm_bindgen_futures::spawn_local(async move { read_and_add(list, families, &notes, &ctx).await });
+}
+
+/// Reads only the installed fonts the open files use (`names`).
+pub fn load_used_fonts(ctx: egui::Context, notes: Notes, names: Vec<String>) {
+    wasm_bindgen_futures::spawn_local(async move {
+        if names.is_empty() {
             return say(&notes, &ctx, "All the fonts used in this file are already available.");
         }
-        // (lower-case, as written): faces are matched ignoring case, and the report keeps the file's spelling.
-        let wanted: Option<Vec<(String, String)>> = only.map(|names| names.into_iter().map(|n| (n.to_lowercase(), n)).collect());
-        let mut found: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let Some(window) = web_sys::window() else { return };
-        let query = match js_sys::Reflect::get(&window, &JsValue::from_str("queryLocalFonts")) {
-            Ok(f) if f.is_function() => js_sys::Function::from(f),
-            _ => return say(&notes, &ctx, "This browser can't read installed fonts. Use Add Font Files… instead."),
-        };
-        let promise = match query.call0(&window) {
-            Ok(p) => js_sys::Promise::from(p),
-            Err(e) => {
-                log::warn!("queryLocalFonts failed: {e:?}");
-                return say(&notes, &ctx, "Access to the installed fonts was denied.");
-            }
-        };
-        let list = match wasm_bindgen_futures::JsFuture::from(promise).await {
-            Ok(v) => js_sys::Array::from(&v),
-            Err(e) => {
-                log::warn!("queryLocalFonts rejected: {e:?}");
-                return say(&notes, &ctx, "Access to the installed fonts was denied.");
-            }
-        };
-        let mut files: Vec<(String, Vec<u8>)> = Vec::new();
-        let mut total = 0usize;
-        for i in 0..list.length().min(MAX_TRIED) {
-            if files.len() >= MAX_FONT_FILES || total >= MAX_FONT_BYTES {
-                log::warn!("local fonts: stopped after {} files ({total} bytes)", files.len());
-                break;
-            }
-            let face = list.get(i);
-            if let Some(wanted) = &wanted {
-                let names: Vec<String> = face_names(&face).iter().map(|n| n.to_lowercase()).collect();
-                let Some((hit, _)) = wanted.iter().find(|(w, _)| names.contains(w)) else { continue };
-                found.insert(hit.clone());
-            }
-            let Some(bytes) = face_bytes(&face, MAX_FONT_BYTES.saturating_sub(total)).await else { continue };
-            total = total.saturating_add(bytes.len());
-            let name = js_sys::Reflect::get(&face, &JsValue::from_str("postscriptName")).ok().and_then(|v| v.as_string());
-            files.push((format!("{}.ttf", name.unwrap_or_else(|| format!("local-font-{i}"))), bytes));
+        match query_fonts().await {
+            Ok(list) => read_and_add(list, names, &notes, &ctx).await,
+            Err(why) => say(&notes, &ctx, why),
         }
-        let missing: Vec<String> =
-            wanted.map(|w| w.into_iter().filter(|(low, _)| !found.contains(low)).map(|(_, orig)| orig).collect()).unwrap_or_default();
-        finish(files, &missing, &notes, &ctx);
     });
+}
+
+/// Reads the faces of `list` that go by one of `names` (family, full or PostScript name, ignoring
+/// case), within the limits, and adds them; says which of the names matched nothing.
+async fn read_and_add(list: js_sys::Array, names: Vec<String>, notes: &Notes, ctx: &egui::Context) {
+    // (lower-case, as written): faces are matched ignoring case, and the report keeps the spelling given.
+    let wanted: Vec<(String, String)> = names.into_iter().map(|n| (n.to_lowercase(), n)).collect();
+    let mut found: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut total = 0usize;
+    for i in 0..list.length().min(MAX_TRIED) {
+        if files.len() >= MAX_FONT_FILES || total >= MAX_FONT_BYTES {
+            log::warn!("local fonts: stopped after {} files ({total} bytes)", files.len());
+            break;
+        }
+        let face = list.get(i);
+        let known: Vec<String> = face_names(&face).iter().map(|n| n.to_lowercase()).collect();
+        let Some((hit, _)) = wanted.iter().find(|(w, _)| known.contains(w)) else { continue };
+        found.insert(hit.clone());
+        let Some(bytes) = face_bytes(&face, MAX_FONT_BYTES.saturating_sub(total)).await else { continue };
+        total = total.saturating_add(bytes.len());
+        files.push((format!("{}.ttf", string_prop(&face, "postscriptName").unwrap_or_else(|| format!("local-font-{i}"))), bytes));
+    }
+    let missing: Vec<String> = wanted.into_iter().filter(|(low, _)| !found.contains(low)).map(|(_, orig)| orig).collect();
+    finish(files, &missing, notes, ctx);
 }
 
 /// The bytes of one `FontData`, unless the face is too big for `room` or can't be read.

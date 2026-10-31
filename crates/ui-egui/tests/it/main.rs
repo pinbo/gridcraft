@@ -37,6 +37,7 @@ mod filter_menu_enter;
 mod find_dialog_focus;
 mod floating_pictures;
 mod font_box_filter;
+mod font_picker;
 mod font_size_box;
 mod format_chart_type;
 mod format_painter;

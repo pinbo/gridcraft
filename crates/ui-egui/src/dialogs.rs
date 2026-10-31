@@ -20,6 +20,7 @@ mod command_search;
 mod cond_format_rules;
 mod data;
 mod find;
+mod font_picker;
 mod format_cells;
 mod insert_function;
 mod names;
@@ -950,6 +951,9 @@ impl Dialog {
                 )
             }
             "journal" => Dialog::custom("journal", "Action Journal", json!({})),
+            "fontPicker" => {
+                Dialog::custom("fontPicker", "Load System Fonts", json!({"families": params.get("families").cloned().unwrap_or(json!([]))}))
+            }
             "macros" => crate::macro_ui::open_dialog(app, &params),
             "recordMacro" => return crate::macro_ui::open_record(app, &params),
             "macroEditor" => return crate::macro_editor::open(app, &params),
