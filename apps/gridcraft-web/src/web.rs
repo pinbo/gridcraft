@@ -59,6 +59,11 @@ pub fn start() {
                     let font_picker = crate::local_fonts::Picker::default();
                     let listed_fonts = crate::local_fonts::Listed::default();
                     let mut services = services(inbox.clone(), cc.egui_ctx.clone());
+                    services.set_title = Some(Box::new(|title| {
+                        if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                            document.set_title(title);
+                        }
+                    }));
                     services.load_system_fonts = Some(Box::new({
                         let (ctx, notes, picker, listed) = (cc.egui_ctx.clone(), font_notes.clone(), font_picker.clone(), listed_fonts.clone());
                         move || crate::local_fonts::choose_system_fonts(ctx.clone(), notes.clone(), picker.clone(), listed.clone())

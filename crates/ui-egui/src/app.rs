@@ -158,7 +158,10 @@ impl SheetApp {
         let Some(d) = self.session.active() else { return };
         let title = format!("{}{}", d.display_title(), if d.is_dirty() { " — Edited" } else { "" });
         if self.grid.last_title.as_deref() != Some(title.as_str()) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            match &self.services.set_title {
+                Some(set) => set(&title),
+                None => ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone())),
+            }
             self.grid.last_title = Some(title);
         }
     }
@@ -478,6 +481,22 @@ mod lifecycle_tests {
         assert_eq!(app.grid.last_autosave, saved_at, "the same change is not saved a second time");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    /// A host with a `set_title` service gets the title there and no viewport command is sent (the web runner warns about it).
+    fn a_host_title_service_replaces_the_viewport_command() {
+        let ctx = egui::Context::default();
+        let mut app = app();
+        let seen: std::rc::Rc<std::cell::RefCell<Vec<String>>> = Default::default();
+        let sink = seen.clone();
+        app.services.set_title = Some(Box::new(move |t| sink.borrow_mut().push(t.to_string())));
+        let out = ctx.run_logic(&egui::RawInput::default(), |ctx| app.logic(ctx));
+        assert!(titles(&out).is_empty(), "no Title viewport command");
+        assert_eq!(seen.borrow().len(), 1);
+        let again = ctx.run_logic(&egui::RawInput::default(), |ctx| app.logic(ctx));
+        assert!(titles(&again).is_empty());
+        assert_eq!(seen.borrow().len(), 1, "an unchanged title is not set again");
     }
 
     #[test]

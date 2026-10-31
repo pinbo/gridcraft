@@ -38,6 +38,10 @@ pub struct Services {
     pub open_async: Option<Box<dyn Fn()>>,
     /// Files delivered asynchronously (name, bytes), opened on the next frame.
     pub inbox: Option<Inbox>,
+    /// Web: show the window title (the page's title, which the browser's tab and history use).
+    /// eframe's web runner does not implement `ViewportCommand::Title` and warns about it, so with
+    /// this set the title goes here instead of to the viewport.
+    pub set_title: Option<SetTitle>,
     /// Web: let the page list the fonts installed on the computer (the browser asks permission); the
     /// host then opens the Load System Fonts picker (`fontPicker` dialog with the family names).
     /// `None` hides the font list's entry.
@@ -56,6 +60,9 @@ pub struct Services {
 }
 
 /// Shared queue of files read asynchronously (browser file picker, drag and drop).
+/// Shows a window title (see [`Services::set_title`]).
+pub type SetTitle = Box<dyn Fn(&str)>;
+
 pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
 /// Which parts of the app's own window chrome are drawn. Everything is on by default; a host
