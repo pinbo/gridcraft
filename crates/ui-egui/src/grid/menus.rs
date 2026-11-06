@@ -3,6 +3,46 @@ use super::geo::Geo;
 use super::tables::filter_table_range;
 use super::{Arc, Drag, FillTag, RangeRef, Rect, Sense, Sheet, SheetApp, Stroke, Tokens, col_to_letters, json, pos2, vec2};
 
+/// Text filter choices: label, `=`/`<>` operator, and wildcard prefix/suffix. Written as wildcard
+/// patterns (as Excel stores them) so the criterion round-trips through XLSX.
+const TEXT_FILTERS: [(&str, &str, (&str, &str)); 8] = [
+    ("equals", "=", ("", "")),
+    ("does not equal", "<>", ("", "")),
+    ("contains", "=", ("*", "*")),
+    ("does not contain", "<>", ("*", "*")),
+    ("begins with", "=", ("", "*")),
+    ("does not begin with", "<>", ("", "*")),
+    ("ends with", "=", ("*", "")),
+    ("does not end with", "<>", ("*", "")),
+];
+
+/// The custom-filter operator and pattern for text filter choice `i`; the typed text's own `*`, `?`
+/// and `~` are escaped so they match literally.
+fn text_filter_criterion(i: usize, text: &str) -> (&'static str, String) {
+    let (_, op, (pre, post)) = TEXT_FILTERS.get(i).copied().unwrap_or(TEXT_FILTERS[2]);
+    let mut esc = String::with_capacity(text.len());
+    for c in text.chars() {
+        if matches!(c, '*' | '?' | '~') {
+            esc.push('~');
+        }
+        esc.push(c);
+    }
+    (op, format!("{pre}{esc}{post}"))
+}
+
+#[cfg(test)]
+mod text_filter_tests {
+    use super::text_filter_criterion;
+
+    #[test]
+    fn builds_wildcard_patterns() {
+        assert_eq!(text_filter_criterion(2, "ab"), ("=", "*ab*".to_string()));
+        assert_eq!(text_filter_criterion(5, "a*"), ("<>", "a~**".to_string()));
+        assert_eq!(text_filter_criterion(6, "x"), ("=", "*x".to_string()));
+        assert_eq!(text_filter_criterion(1, "x"), ("<>", "x".to_string()));
+    }
+}
+
 /// Draws the filter-header popup: sort, search/select-all, apply/clear, a lazily installed table autofilter, new-open search focus and dismissal.
 pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool) {
     let Some((col, row, at)) = app.grid.filter_menu else { return };
@@ -35,6 +75,10 @@ pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
     let key = egui::Id::unique(("filter_sel", col));
     let search_key = egui::Id::unique(("filter_search", col));
     let buttons_key = egui::Id::unique(("filter_buttons", col));
+    let cmp_op_key = egui::Id::unique(("filter_cmp_op", col));
+    let cmp_val_key = egui::Id::unique(("filter_cmp_val", col));
+    let txt_op_key = egui::Id::unique(("filter_txt_op", col));
+    let txt_val_key = egui::Id::unique(("filter_txt_val", col));
     // Enter is the menu's OK, as in Excel: taken before the search box (which would only drop its
     // focus) and the value checkboxes (which would toggle) see it. A focused button keeps it as its click.
     let buttons: Vec<egui::Id> = ui.ctx().data_mut(|d| d.get_temp(buttons_key)).unwrap_or_default();
@@ -54,6 +98,63 @@ pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
             if descending.clicked() {
                 let _ = app.run("data.sortDescending", json!({"column": col_to_letters(col)}));
                 close = true;
+            }
+            ui.separator();
+            // Number filter: pick >, < or = and a value; the rows whose cell compares true stay.
+            let mut op: String = ui.ctx().data_mut(|d| d.get_temp(cmp_op_key)).unwrap_or_else(|| ">".to_string());
+            let mut cmp_val: String = ui.ctx().data_mut(|d| d.get_temp(cmp_val_key)).unwrap_or_default();
+            let mut cmp_apply = false;
+            ui.horizontal(|ui| {
+                for o in [">", "<", "="] {
+                    if ui.selectable_label(op == o, o).clicked() {
+                        op = o.to_string();
+                    }
+                }
+                let field = ui.add(egui::TextEdit::singleline(&mut cmp_val).hint_text("Number").desired_width(70.0));
+                let go = ui.button("Filter");
+                if go.clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                    cmp_apply = true;
+                }
+            });
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(cmp_op_key, op.clone());
+                d.insert_temp(cmp_val_key, cmp_val.clone());
+            });
+            if cmp_apply && !cmp_val.trim().is_empty() {
+                let p = json!({"column": col_to_letters(col), "custom": {"op": op, "value": cmp_val.trim()}});
+                if app.run("data.filterBy", p).is_ok() {
+                    close = true;
+                }
+            }
+            ui.separator();
+            // Text filter: equals / contains / begins with / ends with, each with its negative.
+            let mut top: usize = ui.ctx().data_mut(|d| d.get_temp(txt_op_key)).unwrap_or(2);
+            let mut tval: String = ui.ctx().data_mut(|d| d.get_temp(txt_val_key)).unwrap_or_default();
+            let mut txt_apply = false;
+            ui.horizontal_wrapped(|ui| {
+                for (i, (label, _, _)) in TEXT_FILTERS.iter().enumerate() {
+                    if ui.selectable_label(top == i, *label).clicked() {
+                        top = i;
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                let field = ui.add(egui::TextEdit::singleline(&mut tval).hint_text("Text").desired_width(120.0));
+                let go = ui.button("Filter Text");
+                if go.clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                    txt_apply = true;
+                }
+            });
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(txt_op_key, top);
+                d.insert_temp(txt_val_key, tval.clone());
+            });
+            if txt_apply && !tval.is_empty() {
+                let (op, pattern) = text_filter_criterion(top, &tval);
+                let p = json!({"column": col_to_letters(col), "custom": {"op": op, "value": pattern}});
+                if app.run("data.filterBy", p).is_ok() {
+                    close = true;
+                }
             }
             ui.separator();
             ui.label(egui::RichText::new("Filter").strong());
@@ -116,6 +217,10 @@ pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
             d.remove::<Vec<(String, bool)>>(key);
             d.remove::<String>(search_key);
             d.remove::<Vec<egui::Id>>(buttons_key);
+            d.remove::<String>(cmp_val_key);
+            d.remove::<String>(cmp_op_key);
+            d.remove::<usize>(txt_op_key);
+            d.remove::<String>(txt_val_key);
         });
         app.grid.filter_menu = None;
     }
